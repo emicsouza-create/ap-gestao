@@ -23,12 +23,16 @@
     <nav id="tabs"></nav>
   </div>
 </header>
+<div class="offline" id="offline" hidden>Sem internet. As alterações não serão salvas até a conexão voltar.</div>
 <main class="wrap" id="view"><div class="empty">Carregando dados…</div></main>
+<nav class="bnav" id="bnav" hidden aria-label="Menu principal"></nav>
 <dialog id="dlg"></dialog>
 <div class="toast" id="toast" hidden></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
+<script src="contrato.js"></script>
 <script>if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
 </body>
 </html>
