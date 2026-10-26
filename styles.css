@@ -254,3 +254,10 @@ dialog{overflow:auto}
 }
 @keyframes subir{from{transform:translateY(40px);opacity:.5}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){dialog[open]{animation:none}.pbar i{transition:none}}
+
+/* várias fisios no mesmo paciente */
+fieldset.multi{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:0;display:flex;flex-wrap:wrap;gap:4px 18px}
+fieldset.multi legend{font-size:13px;color:var(--muted);padding:0 4px}
+fieldset.multi .chk{min-height:44px;display:flex;align-items:center;gap:8px}
+fieldset.multi .chk{flex:0 0 auto;white-space:nowrap;font-size:15px;color:var(--ink,inherit)}
+fieldset.multi input[type=checkbox]{width:20px;height:20px;margin:0;flex:none}

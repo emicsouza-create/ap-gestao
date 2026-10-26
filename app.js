@@ -132,6 +132,7 @@ const ETAPAS = [
 const STATUS_PAC = {ativo:['Ativo','ok'], internado:['Internado','bad'], pausado:['Pausado','warn'], alta:['Alta / encerrado','mute'], inativo:['Inativo','mute'], verificar:['Conferir cadastro','info']};
 const STATUS_AG = {agendado:['Agendado','mute'], feito:['Realizado','ok'], falta:['Falta (cobrada)','bad'], remarcado:['Remarcado','info'], cancelado:['Não aconteceu (sem cobrança)','warn']};
 
+const pacFisios = p => (p && Array.isArray(p.fisios) && p.fisios.length) ? p.fisios : (p && p.fisio ? [p.fisio] : []);
 const fisios = () => Object.values(S.equipe).filter(e => e.ativo !== false && e.atende).map(e => e.nome).sort();
 const pacAtivos = () => Object.values(S.pacientes).filter(p => p.status === 'ativo' || p.status === 'internado' || p.status === 'verificar');
 const pacNome = id => S.pacientes[id]?.nome || '(paciente removido)';
@@ -390,7 +391,7 @@ function vPacientes(){
     const pl = S.planos[p._id] || {}; const st = STATUS_PAC[p.status] || ['—','mute'];
     const chip = p.status !== 'ativo' ? [st[0], st[1]] : isAdmin && !pl.conferido ? ['Conferir valor','warn'] : !p.contrato ? ['Sem contrato','warn'] : null;
     return `<button class="irow" data-act="pac-edit" data-id="${p._id}"><span class="tx"><span class="t">${esc(p.nome)}</span>
-      <span class="m">${esc([p.frequencia ? p.frequencia + 'x por semana' : '', p.fisio ? p.fisio.split(' ')[0] : 'sem fisio definida', p.exclusivo ? 'exclusivo Ana' : ''].filter(Boolean).join(' · '))}</span></span>
+      <span class="m">${esc([p.frequencia ? p.frequencia + 'x por semana' : '', pacFisios(p).length ? pacFisios(p).map(n => n.split(' ')[0]).join(' e ') : 'sem fisio definida', p.exclusivo ? 'exclusivo Ana' : ''].filter(Boolean).join(' · '))}</span></span>
       <span class="r">${isAdmin ? `<span class="num">${pl.valor ? brl(pl.valor) : '—'}</span>` : ''}${chip ? `<span class="chip ${chip[1]}">${chip[0]}</span>` : ''}</span>${ICON.chev}</button>`; }).join('')
     : `<div class="empty">${todos.length ? 'Ninguém aqui com esse filtro.' : 'Nenhum paciente cadastrado ainda.'}</div>`}</section>`;
 }
@@ -542,7 +543,7 @@ function pacFields(){
     {k:'responsavel',l:'Responsável (contratante)'},{k:'telefone',l:'WhatsApp do responsável',t:'tel',ph:'(45) 99999-9999'},
     {k:'endereco',l:'Endereço do atendimento',full:1},
     {k:'frequencia',l:'Frequência por semana',t:'select',o:['','2','3','5','7']},
-    {k:'fisio',l:'Quem atende',t:'select',o:['', ...fisios()]},
+    {k:'fisios',l:'Quem atende (pode marcar as duas)',t:'multi',o:fisios(),full:1},
     {k:'status',l:'Situação',t:'select',o:Object.entries(STATUS_PAC).map(([k,v])=>[k,v[0]])},
     {k:'statusDesde',l:'Situação desde',t:'date'},
     {k:'medico',l:'Médico que indicou'},{k:'inicio',l:'Início do contrato',t:'date'},
@@ -564,11 +565,12 @@ function pacFields(){
 function pacForm(id){
   const p = id ? S.pacientes[id] : {status:'ativo',imagem:'pendente',inicio:today()}; const pl = id ? (S.planos[id]||{}) : {};
   const v = Object.assign({}, p, {pl_valor:pl.valor, pl_pagador:pl.pagador, pl_forma:pl.forma||'Pix', pl_vencDia:pl.vencDia||cfg().vencDia, pl_conferido: !!pl.conferido,
-    pl_cpf:pl.cpf, pl_email:pl.email, pl_endResp:pl.endResp, pl_nasc:pl.nasc, pl_parentesco:pl.parentesco});
+    pl_cpf:pl.cpf, pl_email:pl.email, pl_endResp:pl.endResp, pl_nasc:pl.nasc, pl_parentesco:pl.parentesco, fisios: pacFisios(p)});
   openForm(id ? p.nome : 'Novo paciente', pacFields(), v, async (d) => {
     const pid = id || db.collection('pacientes').doc().id;
     const pd = {}; const pld = {};
     Object.entries(d).forEach(([k,x]) => k.startsWith('pl_') ? pld[k.slice(3)] = x : pd[k] = x);
+    if (pd.fisios) pd.fisio = pd.fisios[0] || '';
     const final = Object.assign({}, id ? stripId(S.pacientes[id]) : {criado: today()}, pd);
     if (!id && isAdmin) final.contratoGeradoEm = new Date().toISOString();
     await db.doc('pacientes/'+pid).set(final);
@@ -616,7 +618,7 @@ function agForm(id){
   const a = id ? S.agenda[id] : {tipo:'atendimento', data: agWeek > today() ? agWeek : today(), status:'agendado', fisio: agFisio};
   openForm(id ? 'Atendimento' : 'Novo atendimento', agFields(), a, async d => {
     if (!d.pid && !d.pnome) throw {code:'Escolha o paciente ou escreva um nome'};
-    if (!d.fisio && d.pid) d.fisio = S.pacientes[d.pid]?.fisio || '';
+    if (!d.fisio && d.pid){ const pf = pacFisios(S.pacientes[d.pid]); d.fisio = (pf.includes(agFisio) ? agFisio : pf[0]) || ''; }
     if (d.pid) d.pnome = S.pacientes[d.pid]?.nome || d.pnome;
     const ref = id ? db.doc('agenda/'+id) : db.collection('agenda').doc();
     await ref.set(Object.assign({ordem: id ? (S.agenda[id].ordem||0) : 99}, d));
@@ -647,7 +649,7 @@ function vEquipe(){
   ${isAdmin ? vAcessos() : ''}
   <div class="grid g2">
   <section><div class="head" style="margin-bottom:8px"><h2 style="margin:0">Equipe</h2><span class="sp"></span>${isAdmin?'<button class="btn sm" data-act="eq-new">Adicionar pessoa</button>':''}</div>
-    <div class="panel list">${E.length ? E.map(e => { const pc = pacAtivos().filter(p=>p.fisio===e.nome); const sem = Object.values(S.agenda).filter(a=>a.fisio===e.nome && a.data>=wk && a.data<=we).length;
+    <div class="panel list">${E.length ? E.map(e => { const pc = pacAtivos().filter(p=>pacFisios(p).includes(e.nome)); const sem = Object.values(S.agenda).filter(a=>a.fisio===e.nome && a.data>=wk && a.data<=we).length;
       return `<div class="row"><div class="main"><div class="name">${esc(e.nome)} ${e.ativo===false?'<span class="chip mute">Inativa</span>':''}</div>
       <div class="meta">${esc(e.funcao||'')}${e.atende ? ` · ${pc.length} paciente${pc.length!==1?'s':''} · ${sem} atendimento${sem!==1?'s':''} nesta semana` : ''}</div>
       ${e.atende && pc.length ? `<div class="meta" style="margin-top:4px">${pc.map(p=>esc(p.nome)).join(', ')}</div>`:''}</div>
@@ -822,6 +824,8 @@ function openForm(title, fields, vals, onSave, extra){
     let inp;
     if (f.t === 'select') inp = `<select id="${id}" ${dis} ${f.req?'required':''}>${f.o.map(o => { const [k,l] = Array.isArray(o)?o:[o,o||'—']; return `<option value="${esc(k)}" ${String(v)===String(k)?'selected':''}>${esc(l)}</option>`; }).join('')}${v && !f.o.some(o => (Array.isArray(o)?o[0]:o) == v) ? `<option selected value="${esc(v)}">${esc(v)}</option>`:''}</select>`;
     else if (f.t === 'textarea') inp = `<textarea id="${id}" ${dis}>${esc(v)}</textarea>`;
+    else if (f.t === 'multi'){ const sel = Array.isArray(v) ? v : (v ? [v] : []); const ops = [...new Set([...f.o, ...sel])];
+      return `<fieldset class="${f.full?'full':''} multi" id="${id}"><legend>${esc(f.l)}</legend>${ops.map(o => `<label class="chk"><input type="checkbox" value="${esc(o)}" ${sel.includes(o)?'checked':''} ${dis}> ${esc(o)}</label>`).join('') || '<span class="sub">Cadastre a equipe primeiro.</span>'}</fieldset>`; }
     else if (f.t === 'check') return `<label class="chk"><input type="checkbox" id="${id}" ${v?'checked':''} ${dis}> ${esc(f.l)}</label>`;
     else inp = `<input id="${id}" type="${f.t||'text'}" ${f.t==='number'?'step="0.01"':''} value="${esc(v)}" ${f.ph?`placeholder="${esc(f.ph)}"`:''} ${f.req?'required':''} ${dis}>`;
     return `<label class="${f.full?'full':''}">${esc(f.l)}${inp}</label>`;
@@ -835,7 +839,7 @@ function openForm(title, fields, vals, onSave, extra){
     e.preventDefault();
     const out = {};
     fields.forEach(f => { if (f.sec) return; const el = $('#f_'+f.k); if (!el || el.disabled) return;
-      out[f.k] = f.t==='check' ? el.checked : f.t==='number' ? (el.value===''? null : Number(el.value)) : el.value.trim(); });
+      out[f.k] = f.t==='multi' ? [...el.querySelectorAll('input:checked')].map(i => i.value) : f.t==='check' ? el.checked : f.t==='number' ? (el.value===''? null : Number(el.value)) : el.value.trim(); });
     try { await onSave(out); d.close(); toast('Salvo'); schedule(); }
     catch(err){ const m = $('#frmErr'); m.hidden = false; m.textContent = 'Não foi possível salvar (' + (err?.code||'erro') + '). ' + (err?.code==='invalid_argument' ? 'Seu acesso pode ser só de leitura nesta parte.' : 'Tente de novo em alguns segundos.'); }
   };
@@ -880,6 +884,7 @@ document.addEventListener('click', async e => {
       openForm('Novo paciente', pacFields(), {inicio: today(), nome:f.nome, responsavel:f.contato, telefone:f.telefone, medico:f.medico, frequencia:f.frequencia, status:'ativo', imagem:'pendente', inicio: today(), pl_valor:f.valor, pl_forma:'Pix', pl_vencDia: cfg().vencDia}, async d => {
         const pid = db.collection('pacientes').doc().id; const pd = {}, pld = {};
         Object.entries(d).forEach(([k,x]) => k.startsWith('pl_') ? pld[k.slice(3)] = x : pd[k] = x);
+    if (pd.fisios) pd.fisio = pd.fisios[0] || '';
         pd.criado = today(); pd.origem = f.origem;
         pd.contratoGeradoEm = new Date().toISOString();
         await db.doc('pacientes/'+pid).set(pd); await db.doc('planos/'+pid).set(pld); await db.doc('funil/'+id).update({pid, etapa:'definir'});
