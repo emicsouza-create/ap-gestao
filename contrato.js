@@ -137,6 +137,6 @@ function gerarContrato(pid, p0, pl0){
   }
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++){ doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(120); doc.text(`Contrato · ${p.nome || ''} · página ${i} de ${n}`, 105, 290, { align: 'center' }); doc.setTextColor(0); }
-  doc.save(`Contrato AP - ${(p.nome || 'paciente').replace(/[\\/:*?"<>|]/g, '')}.pdf`);
+  doc.save(`Contrato AP - ${(p.nome || 'paciente').replace(/[\\/:*?"<>|]/g, '')}.pdf`.normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
   return true;
 }

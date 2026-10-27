@@ -215,6 +215,7 @@ const ICON = {
   nota: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5M9 12.5h7M9 16h5"/></svg>',
   wpp: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.2-3.6A8 8 0 1 1 8.2 19z"/><path d="M9 9.5c.3 2.4 2.1 4.3 4.5 4.8l1-1.2 2 .9-.4 1.6c-3.9.3-7.6-3.1-8-7l1.6-.5 1 1.9z"/></svg>',
   edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>',
+  avaliacoes: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4.5" width="14" height="16.5" rx="2"/><path d="M9 4.5V3h6v1.5M8.5 11l2 2 4-4M8.5 17h7"/></svg>',
   mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg>',
   money: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v17M16.5 7.5c-.8-1.3-2.5-2-4.5-2-2.5 0-4.2 1.3-4.2 3.1 0 4.3 9 2.2 9 6.6 0 1.9-1.9 3.3-4.8 3.3-2.1 0-3.8-.8-4.6-2.2"/></svg>',
   pdf: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5M12 11v6M9.5 14.5 12 17l2.5-2.5"/></svg>',
@@ -223,19 +224,19 @@ const ICON = {
 
 // ---------- navegação ----------
 const TABS = [
-  ['hoje','Hoje', false], ['agenda','Agenda', false], ['pacientes','Pacientes', false], ['cobranca','Cobrança', true],
+  ['hoje','Hoje', false], ['agenda','Agenda', false], ['pacientes','Pacientes', false], ['avaliacoes','Avaliações', false], ['cobranca','Cobrança', true],
   ['entrada','Entrada', true], ['equipe','Equipe', false], ['painel','Avisos', true]
 ];
 const BNAV_ADMIN = ['hoje','agenda','pacientes','cobranca','mais'];
-function tabsVisiveis(){ return restrito() ? TABS.filter(t => ['hoje','agenda'].includes(t[0])) : TABS.filter(t => !t[2] || isAdmin); }
+function tabsVisiveis(){ return restrito() ? TABS.filter(t => ['hoje','agenda','avaliacoes'].includes(t[0])) : TABS.filter(t => !t[2] || isAdmin); }
 const nomeTab = k => restrito() && k === 'agenda' ? 'Minha semana' : (TABS.find(t => t[0] === k) || [k, k])[1];
 function renderTabs(){
   if (modo !== 'total' && modo !== 'agenda'){ $('#tabs').innerHTML = ''; $('#bnav').innerHTML = ''; $('#bnav').hidden = true; return; }
   const nAlert = isAdmin ? alertas().filter(a => a[0]==='bad').length : 0;
   const badge = k => k === 'painel' && nAlert ? `<span class="badge">${nAlert}</span>` : '';
   $('#tabs').innerHTML = tabsVisiveis().map(([k]) => `<button data-tab="${k}" aria-current="${tab===k}">${nomeTab(k)}${badge(k)}</button>`).join('');
-  const itens = restrito() ? ['hoje','agenda'] : BNAV_ADMIN.filter(k => k === 'mais' || tabsVisiveis().some(t => t[0] === k));
-  const naMais = !['hoje','agenda','pacientes','cobranca'].includes(tab);
+  const itens = restrito() ? ['hoje','agenda','avaliacoes'] : BNAV_ADMIN.filter(k => k === 'mais' || tabsVisiveis().some(t => t[0] === k));
+  const naMais = !restrito() && !['hoje','agenda','pacientes','cobranca'].includes(tab);
   $('#bnav').hidden = false;
   $('#bnav').innerHTML = itens.map(k => k === 'mais'
     ? `<button data-act="mais" aria-current="${naMais}">${ICON.mais}<span>Mais</span>${nAlert ? '<span class="badge">'+nAlert+'</span>' : ''}</button>`
@@ -245,15 +246,16 @@ function fabHtml(){
   if (!canWrite) return '';
   if (tab === 'agenda' && !restrito()) return `<button class="fab" data-act="ag-new">${ICON.plus}<span>Atendimento</span></button>`;
   if (tab === 'pacientes') return `<button class="fab" data-act="pac-new">${ICON.plus}<span>Paciente</span></button>`;
+  if (tab === 'avaliacoes') return `<button class="fab" data-act="av-new">${ICON.plus}<span>Avaliação</span></button>`;
   if (tab === 'entrada') return `<button class="fab" data-act="fun-new">${ICON.plus}<span>Contato</span></button>`;
   return '';
 }
 function render(){
-  if (!tab || (restrito() && !['hoje','agenda'].includes(tab))) tab = 'hoje';
+  if (!tab || (restrito() && !['hoje','agenda','avaliacoes'].includes(tab))) tab = 'hoje';
   renderTabs();
   if (modo === 'pedido'){ if (!dlgOpen()) $('#view').innerHTML = vPedido(); return; }
   if (modo === 'carregando') return;
-  const f = {hoje:vHoje, painel:vPainel, pacientes:vPacientes, entrada:vEntrada, agenda:vAgenda, cobranca:vCobranca, equipe:vEquipe}[tab];
+  const f = {hoje:vHoje, painel:vPainel, pacientes:vPacientes, entrada:vEntrada, agenda:vAgenda, cobranca:vCobranca, equipe:vEquipe, avaliacoes:vAvaliacoes}[tab];
   if (dlgOpen()) return; // não redesenha enquanto um formulário está aberto
   $('#view').innerHTML = f() + fabHtml();
 }
@@ -273,6 +275,7 @@ function maisSheet(){
   const nAlert = isAdmin ? alertas().filter(a => a[0]==='bad').length : 0;
   sheet('Mais', meuEmail, [
     isAdmin && {tab:'painel', act:'goto', icon:ICON.painel, label:'Avisos' + (nAlert ? ` (${nAlert} urgentes)` : ''), desc:'Atrasos, pedidos de acesso e pendências'},
+    {tab:'avaliacoes', act:'goto', icon:ICON.avaliacoes, label:'Avaliações', desc:'Ficha de avaliação com testes e PDF'},
     isAdmin && {tab:'entrada', act:'goto', icon:ICON.entrada, label:'Entrada de pacientes', desc:'Do primeiro contato até quem vai atender'},
     {tab:'equipe', act:'goto', icon:ICON.equipe, label:'Equipe e equipamentos', desc: isAdmin ? 'Acessos ao app e cópia de segurança' : ''},
     isAdmin && {act:'cfg', icon:ICON.cfg, label:'Dados de cobrança', desc:'Pix, multa, juros e WhatsApp da contabilidade'},
@@ -334,6 +337,7 @@ function agSheet(id){
   const outro = a.tipo === 'outro', evo = S.evolucoes[id];
   sheet(p.nome || a.pnome || 'Atendimento', [fmtD(a.data), a.hora, a.fisio, s !== 'agendado' ? STATUS_AG[s][0] : ''].filter(Boolean).join(' · '), [
     canWrite && !outro && s === 'agendado' && {act:'ag-feito', id, icon:ICON.check, label:'Marcar como realizado', cls:'pri'},
+    canWrite && a.tipo === 'avaliacao' && {act:'av-ag', id, icon:ICON.avaliacoes, label:'Fazer avaliação', desc:'Abre a ficha de avaliação deste paciente', cls: s === 'agendado' ? 'pri' : ''},
     canWrite && !outro && {act:'evo', id, icon:ICON.mic, label: evo ? 'Ver evolução' : 'Evoluir', desc:'Áudio, foto ou texto'},
     canWrite && !outro && s === 'agendado' && {act:'ag-rem', id, icon:ICON.redo, label:'Não aconteceu ou remarcar', desc:'Motivo, aviso de 6 horas e nova data'},
     canWrite && !outro && s !== 'agendado' && {act:'ag-undo', id, icon:ICON.redo, label:'Voltar para agendado'},
@@ -684,7 +688,8 @@ function evoForm(agId){
   const d = $('#dlg');
   d.innerHTML = `<div class="dlg"><h2>Evolução · ${esc(nome)}</h2>
     <p class="sub" style="margin:0">${fmtD(a.data)} · ${esc(a.fisio||'')}${e ? ` · salva por ${esc(e.fisio||'')} em ${fmtD((e.criadoEm||'').slice(0,10))}` : ''}</p>
-    ${e ? '' : `<p class="sub" style="margin:0">Grave um áudio, tire fotos ou escreva. O texto é opcional.</p>`}
+    ${e ? '' : `<p class="sub" style="margin:0">Grave um áudio (o app tenta transcrever enquanto você fala), toque em "Falar" para só ditar, tire fotos ou escreva.</p>`}
+    <div class="lrow"><span class="sub" style="margin:0">Texto da evolução</span>${micBtn('evoTxt')}</div>
     <textarea id="evoTxt" style="min-height:140px" placeholder="Texto opcional. Ex.: paciente acordado, saturação 94 em ar ambiente, fez ciclo ativo, tosse assistida com secreção clara...">${esc(e?.texto || '')}</textarea>
     <div class="midbar">
       <label class="btn" for="evoFoto">Tirar foto</label><input id="evoFoto" type="file" accept="image/*" capture="environment" hidden>
@@ -703,7 +708,7 @@ function evoForm(agId){
 async function carregarHist(pid, skip){
   try {
     const s = await db.collection('evolucoes').where('pid','==',pid).get();
-    const L = s.docs.map(x => Object.assign({_id:x.id}, x.data())).filter(x => x._id !== skip).sort((a,b) => (b.data||'').localeCompare(a.data||'')).slice(0, 5);
+    const L = s.docs.map(x => Object.assign({_id:x.id}, x.data())).filter(x => x._id !== skip && x.tipo !== 'avaliacao').sort((a,b) => (b.data||'').localeCompare(a.data||'')).slice(0, 5);
     const box = $('#evoHist') || $('#pacHist'); if (!box) return;
     box.innerHTML = L.length ? `<div class="sec" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:700;margin:6px 0">Últimas evoluções</div>` + L.map(x => `<div style="border-top:1px solid var(--line);padding:8px 0;font-size:14px"><b>${fmtD(x.data)}</b> · ${esc(x.fisio||'')}<div style="white-space:pre-wrap;margin-top:4px">${esc(x.texto||'')}</div>${x.nFotos || x.nAudios ? `<div class="meta" style="margin-top:4px">${[x.nFotos ? x.nFotos+' foto'+(x.nFotos>1?'s':'') : '', x.nAudios ? x.nAudios+' áudio'+(x.nAudios>1?'s':'') : ''].filter(Boolean).join(' · ')} · <button class="btn sm ghost" data-act="evo-midias" data-id="${x._id}">Ver anexos</button></div>` : ''}<div id="hm-${x._id}" class="midias"></div></div>`).join('') : (box.id === 'pacHist' ? '<p class="sub">Nenhuma evolução registrada ainda.</p>' : '');
   } catch(e){}
@@ -766,13 +771,26 @@ async function gravarAudio(){
   const tipo = tipos.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
   gravador = new MediaRecorder(gravStream, tipo ? { mimeType: tipo } : undefined); gravPartes = [];
   gravador.ondataavailable = e => { if (e.data && e.data.size) gravPartes.push(e.data); };
+  // mede o volume para saber se o áudio ficou com som (alguns celulares não deixam gravar e transcrever ao mesmo tempo)
+  let pico = 0, medir = null, actx = null;
+  try { const AC = window.AudioContext || window.webkitAudioContext; actx = new AC(); const an = actx.createAnalyser(); actx.createMediaStreamSource(gravStream).connect(an);
+    const buf = new Uint8Array(an.fftSize); medir = setInterval(() => { an.getByteTimeDomainData(buf); for (const x of buf) pico = Math.max(pico, Math.abs(x - 128)); }, 200); } catch(e){}
+  const txtAntes = $('#evoTxt')?.value || '';
+  const junto = store.get('ap.transcJunto') !== 'nao';
   gravador.onstop = () => {
-    clearInterval(gravTimer); gravStream.getTracks().forEach(t => t.stop());
+    clearInterval(gravTimer); clearInterval(medir); gravStream.getTracks().forEach(t => t.stop()); try { actx && actx.close(); } catch(e){}
+    if (junto) pararDitado();
     const mime = (gravador.mimeType || tipo || 'audio/webm').split(';')[0];
     const blob = new Blob(gravPartes, { type: mime }); gravador = null; botaoGravar(false);
-    if (blob.size) salvarMidia(blob);
+    let aviso = '';
+    if (junto && medir && pico < 3 && ($('#evoTxt')?.value || '') !== txtAntes){
+      store.set('ap.transcJunto', 'nao');
+      aviso = 'Atenção: o áudio pode ter ficado sem som porque a transcrição usou o microfone. Ouça o áudio salvo. Neste celular, a gravação não vai mais transcrever junto; use "Falar" para ditar.';
+    }
+    if (blob.size) salvarMidia(blob).then(() => { if (aviso){ const m = $('#evoMsg'); if (m){ m.hidden = false; m.textContent = aviso; } } });
   };
   gravador.start(1000); gravInicio = Date.now(); botaoGravar(true);
+  if (junto) ditar('evoTxt', null, { junto: true, onFalha: m => { const mm = $('#evoMsg'); if (mm){ mm.hidden = false; mm.textContent = 'Gravando. ' + m + ' O áudio continua sendo gravado.'; } } });
   gravTimer = setInterval(() => { const s = Math.floor((Date.now() - gravInicio) / 1000); const el = $('#recTempo'); if (el) el.textContent = Math.floor(s/60) + ':' + pad(s%60); if (s >= 900) pararGravacao(); }, 500);
 }
 function pararGravacao(){ if (gravador && gravador.state !== 'inactive') gravador.stop(); }
@@ -865,6 +883,7 @@ document.addEventListener('click', async e => {
   if (a === 'close') return closeDlg();
   if (a === 'copy-msg') return copy($('#msgTxt').textContent, 'Mensagem copiada');
   if (!db) return;
+  if (a === 'ditar' || a.startsWith('av-')) return avAcao(a, id, b);
   try {
   switch(a){
     case 'pac-new': return pacForm(null);

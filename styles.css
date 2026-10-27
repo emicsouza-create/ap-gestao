@@ -261,3 +261,31 @@ fieldset.multi legend{font-size:13px;color:var(--muted);padding:0 4px}
 fieldset.multi .chk{min-height:44px;display:flex;align-items:center;gap:8px}
 fieldset.multi .chk{flex:0 0 auto;white-space:nowrap;font-size:15px;color:var(--ink,inherit)}
 fieldset.multi input[type=checkbox]{width:20px;height:20px;margin:0;flex:none}
+
+/* ---------- avaliação e transcrição (out/2026) ---------- */
+.lrow{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.form .fl{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:600;min-width:0}
+.form .fl.full{grid-column:1/-1}
+.btn.mic{gap:4px;color:var(--accent)}
+.btn.mic svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.btn.mic.on{background:var(--bad);border-color:var(--bad);color:#fff;animation:pulsa 1.4s ease-in-out infinite}
+@keyframes pulsa{50%{opacity:.75}}
+@media (prefers-reduced-motion: reduce){.btn.mic.on{animation:none}}
+.dlg.av #avForm{display:flex;flex-direction:column;gap:10px}
+.dlg.av details{border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.dlg.av details > summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;padding:12px 14px;min-height:48px;font-weight:700}
+.dlg.av details > summary::-webkit-details-marker{display:none}
+.dlg.av details > summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin-left:auto;flex:none;transition:transform .15s}
+.dlg.av details[open] > summary::after{transform:rotate(225deg)}
+.dlg.av details > summary .nm{flex:0 1 auto}
+.dlg.av details > .form{padding:0 14px 14px}
+.dlg.av details.avsec > summary{font-size:16px}
+.dlg.av details.grp{margin:0 14px 8px;background:var(--bg)}
+.dlg.av details.grp > summary{font-size:14.5px}
+.dlg.av details.tst{margin:0 10px 8px;border-radius:10px}
+.dlg.av details.tst > summary{font-weight:600;font-size:14px;min-height:44px}
+.dlg.av details.tst > .form{padding:0 12px 12px}
+.dlg.av #avTodosBtn{margin:0 14px 14px}
+.dlg.av details[data-s="4"] > .sub{padding:0 14px}
+output.calc{display:flex;align-items:center;min-height:40px;padding:0 10px;border-radius:8px;background:var(--accent-soft);color:var(--fg);font-weight:700;font-size:15px}
+@media (max-width:760px){.dlg.av .form{grid-template-columns:1fr 1fr}.dlg.av details.tst > .form{grid-template-columns:1fr 1fr}}

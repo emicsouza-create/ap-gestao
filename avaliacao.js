@@ -1,0 +1,319 @@
+// ---------- TRANSCRIÇÃO POR VOZ ----------
+// Usa o reconhecimento de fala do próprio navegador (Chrome no Android, Safari no iPhone). Precisa de internet.
+const SRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let dit = null;
+const juntarTexto = (a, b) => { a = a || ''; b = (b || '').trim(); if (!b) return a; return a + (a && !/\s$/.test(a) ? ' ' : '') + b; };
+const micBtn = alvo => `<button type="button" class="btn sm mic" data-act="ditar" data-alvo="${alvo}">${ICON.mic}<span>Falar</span></button>`;
+function marcaBotao(btn, on){
+  if (!btn) return; btn.classList.toggle('on', on);
+  const s = btn.querySelector('span'); if (s) s.textContent = on ? 'Ouvindo… toque para parar' : 'Falar';
+}
+function pararDitado(){
+  if (!dit) return; const d = dit; dit = null;
+  try { d.rec.abort(); } catch(e){}
+  marcaBotao(d.btn, false);
+}
+// opts.onFalha(msg): em vez de mostrar aviso, avisa quem chamou (usado na gravação de áudio)
+function ditar(alvo, btn, opts = {}){
+  if (dit){ const mesmo = dit.alvo === alvo && !opts.junto; pararDitado(); if (mesmo) return false; }
+  const falha = m => { if (opts.onFalha) opts.onFalha(m); else toast(m); };
+  if (!SRec){ falha('Este navegador não transcreve. Toque no campo de texto e use o microfone do teclado do celular.'); return false; }
+  const el = document.getElementById(alvo); if (!el) return false;
+  const st = { alvo, btn, base: el.value, rec: null, erro: null, mudo: 0 };
+  const nova = () => {
+    const rec = new SRec(); rec.lang = 'pt-BR'; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
+    rec.onresult = e => {
+      let txt = ''; for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+      const alvoEl = document.getElementById(alvo); if (!alvoEl) return pararDitado();
+      st.mudo = 0; alvoEl.value = juntarTexto(st.base, txt); alvoEl.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    rec.onerror = e => { st.erro = e.error; };
+    rec.onend = () => {
+      if (dit !== st) return;
+      const alvoEl = document.getElementById(alvo); if (!alvoEl) return pararDitado();
+      st.base = alvoEl.value;
+      const er = st.erro; st.erro = null;
+      if (er === 'not-allowed' || er === 'service-not-allowed'){ pararDitado(); return falha('A transcrição foi bloqueada. Libere o microfone para este app nas configurações do celular.'); }
+      if (er === 'audio-capture'){ pararDitado(); return falha('O microfone está ocupado e a transcrição não ligou.'); }
+      if (er === 'network'){ pararDitado(); return falha('A transcrição precisa de internet.'); }
+      if (er === 'no-speech' && ++st.mudo >= 4){ pararDitado(); return opts.onFalha ? null : toast('Parei de ouvir porque ninguém falou.'); }
+      try { st.rec = nova(); st.rec.start(); } catch(err){ pararDitado(); }
+    };
+    return rec;
+  };
+  dit = st; st.rec = nova();
+  try { st.rec.start(); } catch(err){ dit = null; falha('Não consegui ligar a transcrição.'); return false; }
+  marcaBotao(btn, true);
+  return true;
+}
+
+// ---------- AVALIAÇÃO ----------
+// Guardada na coleção "evolucoes" com tipo "avaliacao": assim vale a mesma regra de acesso
+// (a Camila só vê e altera as avaliações em que ela é a fisioterapeuta).
+const AV_SITUACAO = [['agudo','Agudo'],['cronico','Crônico'],['na','Não se aplica']];
+const AV_PUBLICO = [['ped','Pediátrico'],['adulto','Adulto']];
+const AV_FICHAS = { cardio: { nome: 'Cardiorrespiratória', grupos: null }, geral: { nome: 'Geral', grupos: ['extra'] }, sono: { nome: 'Sono', grupos: ['extra'] } };
+const AV_EVOL = [['neurocentral','Progressivo neurocentral'],['neuroperiferico','Progressivo neuroperiférico'],['naoprog','Não progressivo']];
+const AV_RESP = [['espontanea','Espontânea'],['assistida','Assistida']];
+const AV_COMORB = [['neuro','Neurológica'],['resp','Respiratória'],['cardio','Cardiovascular']];
+// [código, nome, unidade, tem valor predito?, 'txt' quando o resultado é descritivo]
+const AV_GRUPOS = [
+  { g: 'mob', t: 'Mobilidade e queda', itens: [['tug','TUG','s',1],['vmarcha','Velocidade de marcha','m/s',1],['sppb','SPPB','pontos',0],['tls5','TLS5rep','s',1],['tls30','TLS30s','repetições',1],['fssicu','FSS-ICU','pontos',0],['ims','IMS','pontos',0]] },
+  { g: 'forca', t: 'Força', itens: [['rm1','1RM','kg',1],['preensao','Preensão palmar','kgf',1],['dina','Dinamometria','kgf',1],['dinaq','Dinamometria de quadríceps','kgf',1],['mrc','MRC','pontos',0]] },
+  { g: 'pulm', t: 'Função pulmonar', itens: [['cvf','CVF','L',1],['vef1','VEF1','L',1],['pfe','PFE','L/min',1],['pft','Pico de fluxo de tosse','L/min',1],['pimax','PiMax','cmH2O',1],['pemax','PeMax','cmH2O',1],['sindex','S-Index','cmH2O',1],['endur','Endurance respiratório','',1]] },
+  { g: 'cardio', t: 'Aptidão cardiorrespiratória', itens: [['tc6','TC6','m',1],['td6','TD6','',1],['iswt','ISWT','m',1],['chester','Chester Step','',1],['tls1','TLS 1 min','repetições',1],['tc2','TC2','',1],['risco','Estratificação de risco','',0,'txt']] },
+  { g: 'vfc', t: 'VFC', itens: [['vfc','Variabilidade da frequência cardíaca','',0,'txt']] },
+  { g: 'us', t: 'Ultrassom', itens: [['uspl','Pleuropulmonar','',0,'txt'],['usdia','Diafragmático','',0,'txt'],['usme','Musculoesquelético','',0,'txt']] },
+  { g: 'esc', t: 'Escalas', itens: [['sf36','SF-36','pontos',0],['whoqol','WHOQOL-BREF','pontos',0],['cat','CAT','pontos',0],['act','ACT','pontos',0],['alsfrs','ALSFRS-R','pontos',0]] },
+  { g: 'extra', t: 'Testes extras', itens: [['x1','Teste extra 1','',1,'extra'],['x2','Teste extra 2','',1,'extra'],['x3','Teste extra 3','',1,'extra'],['x4','Teste extra 4','',1,'extra']] }
+];
+const AV_ANAM = [['diag','Diagnósticos clínicos'],['queixa','Queixa principal'],['hda','HDA (história da doença atual)'],['hdp','HDP (história da doença pregressa)'],['antfam','Antecedentes familiares']];
+const AV_ANAM2 = [['farmacos','Fármacos em uso'],['equipe','Equipe assistencial'],['examefis','Exame físico']];
+const AV_VITAIS = [['fc','FC','bpm'],['fr','FR','irpm'],['pa','PA','mmHg','text'],['spo2','SpO2','%'],['temp','Temperatura','°C']];
+const AV_OBRIG = [['pnome','Paciente'],['quando','Data e hora'],['fisio','Fisioterapeuta'],['situacao','Situação'],['publico','Público'],['ficha','Ficha'],['altura','Altura'],['massa','Massa']];
+
+// a Camila não carrega a lista de pacientes; para ela, a busca usa os pacientes da agenda dela
+function avPacientes(){
+  const m = new Map();
+  if (restrito()) Object.values(S.agenda).forEach(a => { if (a.tipo !== 'outro' && a.pnome && !m.has(a.pnome)) m.set(a.pnome, { nome: a.pnome, pid: a.pid || '' }); });
+  else Object.values(S.pacientes).filter(p => p.status !== 'inativo').forEach(p => m.set(p.nome, { nome: p.nome, pid: p._id }));
+  return [...m.values()].sort((a, b) => a.nome.localeCompare(b.nome));
+}
+let avT = null, avLista = null, avAtual = null, avTodos = false, avCarregando = false;
+const num = s => { const n = Number(String(s ?? '').replace(',', '.')); return s === '' || s == null || !isFinite(n) ? null : n; };
+const fmtNum = (n, c = 1) => n == null ? '' : n.toLocaleString('pt-BR', { maximumFractionDigits: c });
+const rotulo = (L, k) => (L.find(x => x[0] === k) || [k, k])[1];
+
+async function carregarAvaliacoes(){
+  if (avCarregando) return; avCarregando = true;
+  try { const s = await db.collection('evolucoes').where('tipo', '==', 'avaliacao').get(); avLista = s.docs.map(d => Object.assign({ _id: d.id }, d.data())); }
+  catch(e){ avLista = avLista || []; toast('Não consegui carregar as avaliações'); }
+  avCarregando = false; schedule();
+}
+function vAvaliacoes(){
+  if (!avLista){ carregarAvaliacoes(); return '<div class="empty">Carregando avaliações…</div>'; }
+  const L = avLista.slice().sort((a, b) => (b.av?.quando || b.data || '').localeCompare(a.av?.quando || a.data || ''));
+  const rasc = L.filter(x => x.status !== 'finalizada').length;
+  return `<div class="head"><div><h1>Avaliações</h1><p class="sub">${rasc ? `${rasc} em rascunho. ` : ''}Toque numa avaliação para continuar ou baixar o PDF.</p></div></div>
+  <section class="panel list">${L.length ? L.map(x => `<button class="irow" data-act="av-edit" data-id="${x._id}"><span class="tx"><span class="t">${esc(x.pnome || 'Sem nome')}</span>
+    <span class="m">${esc([fmtD(x.data), x.fisio ? x.fisio.split(' ')[0] : '', AV_FICHAS[x.av?.ficha]?.nome || ''].filter(Boolean).join(' · '))}</span></span>
+    <span class="r"><span class="chip ${x.status === 'finalizada' ? 'ok' : 'warn'}">${x.status === 'finalizada' ? 'Finalizada' : 'Rascunho'}</span></span>${ICON.chev}</button>`).join('')
+    : '<div class="empty">Nenhuma avaliação ainda. Toque em "Avaliação" para começar.</div>'}</section>`;
+}
+
+// ----- campos do formulário -----
+const avv = k => { const v = (avAtual.av || {})[k]; return v == null ? '' : v; };
+const avIn = (k, l, o = {}) => `<label class="${o.full ? 'full' : ''}">${esc(l)}${o.req ? ' *' : ''}<input data-k="${k}" type="${o.t || 'text'}" ${o.t === 'number' ? 'inputmode="decimal" step="any"' : ''} ${o.list ? `list="${o.list}"` : ''} value="${esc(avv(k))}" ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} ${o.dis ? 'disabled' : ''} autocomplete="off"></label>`;
+const avSel = (k, l, ops, o = {}) => `<label class="${o.full ? 'full' : ''}">${esc(l)}${o.req ? ' *' : ''}<select data-k="${k}" ${o.dis ? 'disabled' : ''}><option value="">Escolha…</option>${ops.map(([v, t]) => `<option value="${esc(v)}" ${String(avv(k)) === String(v) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
+const avTx = (k, l, o = {}) => `<div class="fl full"><div class="lrow"><span>${esc(l)}</span>${micBtn('av_' + k)}</div><textarea id="av_${k}" data-k="${k}" rows="${o.rows || 3}" ${o.ph ? `placeholder="${esc(o.ph)}"` : ''}>${esc(avv(k))}</textarea></div>`;
+const avChk = (k, l, ops) => { const sel = Array.isArray(avv(k)) ? avv(k) : []; return `<fieldset class="full multi"><legend>${esc(l)}</legend>${ops.map(([v, t]) => `<label class="chk"><input type="checkbox" data-k="${k}" data-multi="1" value="${v}" ${sel.includes(v) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</fieldset>`; };
+const selo = '<span class="chip ok selo" hidden>Preenchido</span>';
+
+function avTeste([id, nome, un, pred, tipo]){
+  let corpo;
+  if (tipo === 'txt') corpo = avTx(`t_${id}_r`, 'Resultado e achados', { rows: 3 });
+  else corpo = (tipo === 'extra' ? avIn(`t_${id}_n`, 'Nome do teste') + avIn(`t_${id}_u`, 'Unidade') : '')
+    + avIn(`t_${id}_r`, 'Resultado' + (un ? ` (${un})` : ''), { t: 'number' })
+    + (pred ? avIn(`t_${id}_p`, 'Predito' + (un ? ` (${un})` : ''), { t: 'number' }) + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label>` : '')
+    + avIn(`t_${id}_o`, 'Observações', { full: 1 });
+  return `<details class="tst" data-t="${id}"><summary><span class="nm">${esc(nome)}</span>${selo}</summary><div class="form">${corpo}</div></details>`;
+}
+function avSecao(n, titulo, corpo, cls){
+  return `<details class="avsec ${cls || ''}" data-s="${n}" open><summary><span class="nm">${n}. ${esc(titulo)}</span>${selo}</summary><div class="form">${corpo}</div></details>`;
+}
+function avForm(id, base){
+  pararDitado(); clearTimeout(avT);
+  avAtual = id ? JSON.parse(JSON.stringify(avLista.find(x => x._id === id) || {})) : Object.assign({ status: 'rascunho', av: {} }, base || {});
+  if (!avAtual.av) avAtual.av = {};
+  if (!id && !avAtual.av.quando) avAtual.av.quando = today() + 'T' + new Date().toTimeString().slice(0, 5);
+  if (!avAtual.av.fisio) avAtual.av.fisio = avAtual.fisio || (restrito() ? minhaFisio : '');
+  // rascunho que ficou só neste celular (o app fechou antes de salvar)
+  let recuperado = false;
+  try { const r = JSON.parse(localStorage.getItem('ap.avDraft.' + (id || 'novo')) || 'null'); if (r && r.av && (!id || (r.em || '') > (avAtual.alteradoEm || avAtual.criadoEm || ''))) { avAtual.av = r.av; recuperado = true; } } catch(e){}
+  const ro = !canWrite, fin = avAtual.status === 'finalizada';
+  const pacs = avPacientes().map(p => p.nome);
+  const d = $('#dlg');
+  d.innerHTML = `<div class="dlg av"><h2>${id ? 'Avaliação · ' + esc(avAtual.pnome || '') : 'Nova avaliação'}</h2>
+    ${recuperado ? '<p class="sub" style="margin:0;color:var(--warn)">Recuperei o que estava digitado e não foi salvo.</p>' : ''}
+    ${fin ? `<p class="sub" style="margin:0">Finalizada${avAtual.finalizadaEm ? ' em ' + fmtD(avAtual.finalizadaEm.slice(0, 10)) : ''}. Se alterar, salve de novo para atualizar o PDF.</p>` : '<p class="sub" style="margin:0">Os campos com * são obrigatórios para finalizar. Toque em "Falar" para ditar em qualquer campo de texto.</p>'}
+    <form id="avForm" onsubmit="return false">
+    <datalist id="avPacs">${pacs.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    ${avSecao(1, 'Dados principais',
+      avIn('pnome', 'Paciente', { req: 1, full: 1, list: 'avPacs', ph: 'Digite para buscar na lista' })
+      + avIn('quando', 'Data e hora', { req: 1, t: 'datetime-local' })
+      + (restrito() ? avIn('fisio', 'Fisioterapeuta', { dis: 1 }) : avSel('fisio', 'Fisioterapeuta', fisios().map(f => [f, f]), { req: 1 }))
+      + avSel('situacao', 'Situação', AV_SITUACAO, { req: 1 }) + avSel('publico', 'Público', AV_PUBLICO, { req: 1 })
+      + avSel('ficha', 'Ficha (define os testes)', Object.entries(AV_FICHAS).map(([k, f]) => [k, f.nome]), { req: 1, full: 1 }))}
+    ${avSecao(2, 'Anamnese',
+      AV_ANAM.map(([k, l]) => avTx(k, l)).join('')
+      + avChk('comorb', 'Comorbidades', AV_COMORB)
+      + AV_ANAM2.map(([k, l]) => avTx(k, l)).join('')
+      + avSel('evolucao', 'Evolução', AV_EVOL) + avSel('respiracao', 'Respiração', AV_RESP)
+      + avIn('protese', 'Prótese ventilatória', { full: 1 }))}
+    ${avSecao(3, 'Dados vitais e composição corporal',
+      AV_VITAIS.map(([k, l, un, t]) => avIn(k, `${l} (${un})`, { t: t || 'number' })).join('')
+      + avTx('ausculta', 'Ausculta pulmonar', { rows: 2 }) + avTx('pmv', 'Padrão muscular ventilatório', { rows: 2 })
+      + avIn('altura', 'Altura (cm)', { req: 1, t: 'number' }) + avIn('massa', 'Massa (kg)', { req: 1, t: 'number' })
+      + '<label>IMC (calculado)<output id="avImc" class="calc">—</output></label>'
+      + avIn('pescoco', 'Circunferência do pescoço (cm)', { t: 'number' })
+      + avIn('fonte', 'Fonte dos dados', { full: 1, ph: 'Ex.: medido na avaliação, informado pela família' }))}
+    <details class="avsec" data-s="4" open><summary><span class="nm">4. Testes</span><span class="chip mute" id="avCnt"></span></summary>
+      <p class="sub" id="avFichaMsg" style="margin:8px 0"></p>
+      ${AV_GRUPOS.map(G => `<details class="grp" data-g="${G.g}"><summary><span class="nm">${esc(G.t)}</span><span class="chip ok cnt" hidden></span></summary>${G.itens.map(avTeste).join('')}</details>`).join('')}
+      <button type="button" class="btn sm ghost" data-act="av-todos" id="avTodosBtn"></button>
+    </details>
+    ${avSecao(5, 'Conclusão',
+      avTx('diagfisio', 'Diagnóstico fisioterapêutico', { rows: 4 }) + avTx('objetivos', 'Objetivos terapêuticos', { rows: 3 }) + avTx('condutas', 'Condutas (opcional)', { rows: 3 }))}
+    </form>
+    <p class="sub" id="avMsg" style="margin:0;color:var(--bad)" hidden></p>
+    <div class="foot">${id && isAdmin ? `<button type="button" class="btn ghost" data-act="av-del" data-id="${id}">Excluir</button>` : ''}
+      ${fin ? `<button type="button" class="btn" data-act="av-pdf" data-id="${id}">${ICON.pdf}Baixar PDF</button>` : ''}<span class="sp"></span>
+      <button type="button" class="btn" data-act="close">Fechar</button>
+      ${ro ? '' : `<button type="button" class="btn" data-act="av-salvar">Salvar rascunho</button><button type="button" class="btn pri" data-act="av-final">${fin ? 'Salvar e gerar PDF' : 'Finalizar e gerar PDF'}</button>`}</div></div>`;
+  if (ro) d.querySelectorAll('#avForm input,#avForm select,#avForm textarea').forEach(el => el.disabled = true);
+  if (!d.open) d.showModal();
+  avTodos = false; avAtualizar(true);
+}
+function avLer(){
+  const v = {}; const f = $('#avForm'); if (!f) return v;
+  f.querySelectorAll('[data-k]').forEach(el => {
+    const k = el.dataset.k;
+    if (el.dataset.multi){ v[k] = v[k] || []; if (el.checked) v[k].push(el.value); return; }
+    const x = (el.value || '').trim(); if (x !== '') v[k] = x;
+  });
+  Object.keys(v).forEach(k => { if (Array.isArray(v[k]) && !v[k].length) delete v[k]; });
+  if (restrito()) v.fisio = minhaFisio;
+  return v;
+}
+function avAtualizar(semRascunho){
+  const f = $('#avForm'); if (!f) return; const v = avLer();
+  // IMC = massa (kg) / altura (m)²
+  const alt = num(v.altura), mas = num(v.massa);
+  const imc = alt && mas ? mas / Math.pow(alt / 100, 2) : null;
+  const oi = $('#avImc'); if (oi) oi.textContent = imc ? fmtNum(imc, 1) : '—';
+  // % do predito = resultado ÷ predito × 100
+  AV_GRUPOS.forEach(G => G.itens.forEach(([id]) => { const o = document.getElementById('pc_' + id); if (!o) return;
+    const r = num(v[`t_${id}_r`]), p = num(v[`t_${id}_p`]); o.textContent = r != null && p ? fmtNum(r / p * 100, 0) + '%' : '—'; }));
+  // selos "Preenchido"
+  const tem = el => [...el.querySelectorAll('[data-k]')].some(i => i.dataset.multi ? i.checked : (i.value || '').trim() !== '');
+  let nTestes = 0;
+  f.querySelectorAll('details.tst').forEach(t => { const ok = tem(t); t.querySelector('.selo').hidden = !ok; if (ok) nTestes++; });
+  f.querySelectorAll('details.grp').forEach(g => { const n = [...g.querySelectorAll('details.tst')].filter(t => !t.querySelector('.selo').hidden).length; const c = g.querySelector('.cnt'); c.hidden = !n; c.textContent = n + (n > 1 ? ' preenchidos' : ' preenchido'); });
+  f.querySelectorAll('details.avsec[data-s]').forEach(s => { const sl = s.querySelector(':scope > summary .selo'); if (!sl) return;
+    const n = s.dataset.s; const ok = n === '1' ? ['pnome','quando','fisio','situacao','publico','ficha'].every(k => v[k]) : n === '3' ? !!(v.altura && v.massa) : n === '5' ? !!(v.diagfisio && v.objetivos) : tem(s);
+    sl.hidden = !ok; });
+  const cnt = $('#avCnt'); if (cnt) cnt.textContent = nTestes ? nTestes + (nTestes > 1 ? ' testes preenchidos' : ' teste preenchido') : 'nenhum teste preenchido';
+  // a ficha define quais grupos de testes aparecem
+  const fi = AV_FICHAS[v.ficha];
+  f.querySelectorAll('details.grp').forEach(g => { const vis = avTodos || !fi || !fi.grupos || fi.grupos.includes(g.dataset.g) || !g.querySelector('.cnt').hidden; g.hidden = !vis; });
+  const msg = $('#avFichaMsg'), bt = $('#avTodosBtn');
+  if (msg) msg.textContent = !fi ? 'Escolha a ficha no bloco 1 para ver só os testes dela.' : fi.grupos ? `A ficha ${fi.nome} ainda não tem testes definidos. Aparecem só os testes extras.` : `Testes da ficha ${fi.nome}.`;
+  if (bt){ bt.hidden = !fi || !fi.grupos; bt.textContent = avTodos ? 'Mostrar só os testes da ficha' : 'Mostrar todos os testes'; }
+  if (!semRascunho){ clearTimeout(avT); avT = setTimeout(() => { try { localStorage.setItem('ap.avDraft.' + (avAtual._id || 'novo'), JSON.stringify({ av: avLer(), em: new Date().toISOString() })); } catch(e){} }, 400); }
+}
+document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#avForm')) avAtualizar(); });
+document.addEventListener('change', e => { if (e.target.closest && e.target.closest('#avForm')) avAtualizar(); });
+
+async function avSalvar(finalizar){
+  const v = avLer(), msg = $('#avMsg'); msg.hidden = true;
+  if (finalizar){ const falta = AV_OBRIG.filter(([k]) => !v[k]).map(x => x[1]); if (falta.length){ msg.hidden = false; msg.textContent = 'Para finalizar, preencha: ' + falta.join(', ') + '.'; return; } }
+  if (!v.pnome){ msg.hidden = false; msg.textContent = 'Escreva o nome do paciente antes de salvar.'; return; }
+  const p0 = avPacientes().find(x => x.nome.trim().toLowerCase() === v.pnome.toLowerCase()); const p = p0 ? { _id: p0.pid, nome: p0.nome } : null;
+  const id = avAtual._id || ('av_' + novoId()); const agora = new Date().toISOString();
+  const alt = num(v.altura), mas = num(v.massa); if (alt && mas) v.imc = fmtNum(mas / Math.pow(alt / 100, 2), 1); else delete v.imc;
+  const doc = { tipo: 'avaliacao', pid: p?._id || '', pnome: p?.nome || v.pnome, data: (v.quando || today()).slice(0, 10), fisio: v.fisio || '',
+    status: finalizar ? 'finalizada' : (avAtual.status || 'rascunho'), agId: avAtual.agId || '', av: v,
+    criadoEm: avAtual.criadoEm || agora, alteradoEm: avAtual._id ? agora : '', finalizadaEm: finalizar ? agora : (avAtual.finalizadaEm || '') };
+  try {
+    await db.doc('evolucoes/' + id).set(doc); clearTimeout(avT);
+    try { localStorage.removeItem('ap.avDraft.' + (avAtual._id || 'novo')); } catch(e){}
+    const x = Object.assign({ _id: id }, doc); avLista = (avLista || []).filter(y => y._id !== id).concat([x]);
+    if (finalizar && doc.agId && S.agenda[doc.agId] && (S.agenda[doc.agId].status || 'agendado') === 'agendado') { try { await db.doc('agenda/' + doc.agId).update({ status: 'feito' }); } catch(e){} }
+    $('#dlg').close(); schedule();
+    if (finalizar){ if (gerarPdfAvaliacao(x)) setTimeout(() => toast('Avaliação finalizada. PDF baixado.'), 300); }
+    else toast('Rascunho salvo');
+  } catch(e){ msg.hidden = false; msg.textContent = 'Não foi possível salvar (' + (e?.code || 'erro') + '). O que você digitou continua guardado neste celular; tente de novo.'; }
+}
+
+// ----- PDF -----
+function gerarPdfAvaliacao(x){
+  const J = window.jspdf && window.jspdf.jsPDF;
+  if (!J){ toast('Não consegui carregar o gerador de PDF. Confira a internet e tente de novo.'); return false; }
+  const v = x.av || {}, doc = new J({ unit: 'mm', format: 'a4' });
+  const M = 18, W = 210 - 2 * M, TOP = 20, BOT = 278; let y = TOP;
+  const lh = s => s * 0.3528 * 1.35;
+  const quebra = h => { if (y + h > BOT){ doc.addPage(); y = TOP; } };
+  const escreve = (txt, { size = 10, bold = false, indent = 0, after = 1.5, align = 'left', cor = 0 } = {}) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(cor);
+    doc.splitTextToSize(String(txt), W - indent).forEach(l => { quebra(lh(size)); doc.text(l, align === 'center' ? 105 : M + indent, y, { align }); y += lh(size); });
+    y += after; doc.setTextColor(0);
+  };
+  const titulo = t => { quebra(16); y += 3; escreve(t, { size: 12, bold: true, after: 0.5 }); doc.setDrawColor(79, 125, 135); doc.setLineWidth(0.4); doc.line(M, y, M + W, y); y += 4; };
+  const campo = (rot, val) => { if (val == null || val === '' || (Array.isArray(val) && !val.length)) return; escreve(rot, { size: 9, bold: true, after: 0.3, cor: 80 }); escreve(val, { after: 2.2 }); };
+  const linhaKV = pares => { const t = pares.filter(([, val]) => val !== '' && val != null).map(([r, val]) => `${r}: ${val}`).join('   ·   '); if (t) escreve(t, { after: 2.2 }); };
+  const quando = v.quando ? fmtD(v.quando.slice(0, 10)) + (v.quando.length > 10 ? ' às ' + v.quando.slice(11, 16) : '') : fmtD(x.data);
+
+  escreve('Avaliação fisioterapêutica', { size: 16, bold: true, after: 1, align: 'center' });
+  escreve('AP Fisioterapia Domiciliar', { size: 10, after: 6, align: 'center', cor: 90 });
+  titulo('1. Dados principais');
+  campo('Paciente', x.pnome); linhaKV([['Data', quando], ['Fisioterapeuta', v.fisio || x.fisio]]);
+  linhaKV([['Situação', v.situacao ? rotulo(AV_SITUACAO, v.situacao) : ''], ['Público', v.publico ? rotulo(AV_PUBLICO, v.publico) : ''], ['Ficha', AV_FICHAS[v.ficha]?.nome || '']]);
+
+  const anam = [...AV_ANAM, ['comorb', 'Comorbidades'], ...AV_ANAM2];
+  if (anam.some(([k]) => v[k]) || v.evolucao || v.respiracao || v.protese){
+    titulo('2. Anamnese');
+    anam.forEach(([k, l]) => campo(l, k === 'comorb' ? (v.comorb || []).map(c => rotulo(AV_COMORB, c)).join(', ') : v[k]));
+    linhaKV([['Evolução', v.evolucao ? rotulo(AV_EVOL, v.evolucao) : ''], ['Respiração', v.respiracao ? rotulo(AV_RESP, v.respiracao) : '']]);
+    campo('Prótese ventilatória', v.protese);
+  }
+  titulo('3. Dados vitais e composição corporal');
+  linhaKV(AV_VITAIS.map(([k, l, un]) => [l, v[k] ? `${v[k]} ${un}` : '']));
+  linhaKV([['Altura', v.altura ? v.altura + ' cm' : ''], ['Massa', v.massa ? v.massa + ' kg' : ''], ['IMC', v.imc ? v.imc + ' kg/m²' : ''], ['Pescoço', v.pescoco ? v.pescoco + ' cm' : '']]);
+  campo('Ausculta pulmonar', v.ausculta); campo('Padrão muscular ventilatório', v.pmv); campo('Fonte dos dados', v.fonte);
+
+  const grupos = AV_GRUPOS.map(G => ({ t: G.t, L: G.itens.filter(([id]) => ['r', 'p', 'o', 'n'].some(s => v[`t_${id}_${s}`])) })).filter(G => G.L.length);
+  if (grupos.length){
+    titulo('4. Testes');
+    grupos.forEach(G => {
+      quebra(12); escreve(G.t, { size: 10.5, bold: true, after: 1 });
+      G.L.forEach(([id, nome, un, pred, tipo]) => {
+        const u = tipo === 'extra' ? (v[`t_${id}_u`] || '') : un;
+        const nm = tipo === 'extra' ? (v[`t_${id}_n`] || nome) : nome;
+        if (tipo === 'txt'){ campo(nm, v[`t_${id}_r`]); return; }
+        const r = num(v[`t_${id}_r`]), p = num(v[`t_${id}_p`]);
+        const partes = [r != null ? `resultado ${v[`t_${id}_r`]}${u ? ' ' + u : ''}` : '', pred && p != null ? `predito ${v[`t_${id}_p`]}${u ? ' ' + u : ''}` : '', r != null && p ? `${fmtNum(r / p * 100, 0)}% do predito` : ''].filter(Boolean);
+        escreve(`${nm}: ${partes.join(' · ') || '—'}`, { indent: 3, after: v[`t_${id}_o`] ? 0.3 : 1.6 });
+        if (v[`t_${id}_o`]) escreve('Obs.: ' + v[`t_${id}_o`], { indent: 3, size: 9, after: 1.8, cor: 70 });
+      });
+      y += 1;
+    });
+  }
+  titulo('5. Conclusão');
+  campo('Diagnóstico fisioterapêutico', v.diagfisio); campo('Objetivos terapêuticos', v.objetivos); campo('Condutas', v.condutas);
+  quebra(30); y += 16; doc.setDrawColor(0); doc.setLineWidth(0.3); doc.line(M, y, M + 90, y); y += 5;
+  escreve(v.fisio || x.fisio || 'Fisioterapeuta', { size: 9.5, after: 0 });
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++){ doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(120); doc.text(`Avaliação · ${x.pnome || ''} · ${quando} · página ${i} de ${n}`, 105, 290, { align: 'center' }); doc.setTextColor(0); }
+  doc.save(`Avaliacao AP - ${(x.pnome || 'paciente').replace(/[\\/:*?"<>|]/g, '')} - ${x.data || ''}.pdf`.normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+  return true;
+}
+
+// ----- ações -----
+async function avAcao(a, id, b){
+  if (a === 'ditar') return ditar(b.dataset.alvo, b);
+  if (a === 'av-new') return avForm(null);
+  if (a === 'av-edit') return avForm(id);
+  if (a === 'av-todos'){ avTodos = !avTodos; return avAtualizar(true); }
+  if (a === 'av-salvar') return avSalvar(false);
+  if (a === 'av-final') return avSalvar(true);
+  if (a === 'av-pdf'){ const x = (avLista || []).find(y => y._id === id); if (x) gerarPdfAvaliacao(x); return; }
+  if (a === 'av-del') return confirmBox('Excluir esta avaliação? Não dá para desfazer.', async () => { await db.doc('evolucoes/' + id).delete(); avLista = (avLista || []).filter(y => y._id !== id); toast('Avaliação excluída'); });
+  if (a === 'av-ag'){ // abre a avaliação ligada a um horário de avaliação da agenda
+    const ag = S.agenda[id]; if (!ag) return;
+    if (!avLista){ toast('Carregando avaliações…'); await carregarAvaliacoes(); }
+    const ja = (avLista || []).find(y => y.agId === id); if (ja) return avForm(ja._id);
+    const p = S.pacientes[ag.pid];
+    return avForm(null, { agId: id, fisio: ag.fisio || '', av: { pnome: p?.nome || ag.pnome || '', quando: ag.data + 'T' + (ag.hora || '08:00'), fisio: ag.fisio || (restrito() ? minhaFisio : '') } });
+  }
+}
+$('#dlg').addEventListener('close', pararDitado);
