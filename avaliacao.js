@@ -51,7 +51,6 @@ function ditar(alvo, btn, opts = {}){
 // Guardada na coleção "evolucoes" com tipo "avaliacao": assim vale a mesma regra de acesso
 // (a Camila só vê e altera as avaliações em que ela é a fisioterapeuta).
 const AV_SITUACAO = [['agudo','Agudo'],['cronico','Crônico'],['na','Não se aplica']];
-const AV_PUBLICO = [['ped','Pediátrico'],['adulto','Adulto']];
 const AV_FICHAS = { cardio: { nome: 'Cardiorrespiratória', grupos: null }, geral: { nome: 'Geral', grupos: ['extra'] }, sono: { nome: 'Sono', grupos: ['extra'] } };
 const AV_EVOL = [['neurocentral','Progressivo neurocentral'],['neuroperiferico','Progressivo neuroperiférico'],['naoprog','Não progressivo']];
 const AV_RESP = [['espontanea','Espontânea'],['assistida','Assistida']];
@@ -70,7 +69,7 @@ const AV_GRUPOS = [
 const AV_ANAM = [['diag','Diagnósticos clínicos'],['queixa','Queixa principal'],['hda','HDA (história da doença atual)'],['hdp','HDP (história da doença pregressa)'],['antfam','Antecedentes familiares']];
 const AV_ANAM2 = [['farmacos','Fármacos em uso'],['equipe','Equipe assistencial'],['examefis','Exame físico']];
 const AV_VITAIS = [['fc','FC','bpm'],['fr','FR','irpm'],['pa','PA','mmHg','text'],['spo2','SpO2','%'],['temp','Temperatura','°C']];
-const AV_OBRIG = [['pnome','Paciente'],['quando','Data e hora'],['fisio','Fisioterapeuta'],['situacao','Situação'],['publico','Público'],['ficha','Ficha'],['altura','Altura'],['massa','Massa']];
+const AV_OBRIG = [['pnome','Paciente'],['quando','Data e hora'],['fisio','Fisioterapeuta'],['situacao','Situação'],['ficha','Ficha'],['altura','Altura'],['massa','Massa']];
 
 // a Camila não carrega a lista de pacientes; para ela, a busca usa os pacientes da agenda dela
 function avPacientes(){
@@ -142,7 +141,7 @@ function avForm(id, base){
       avIn('pnome', 'Paciente', { req: 1, full: 1, list: 'avPacs', ph: 'Digite para buscar na lista' })
       + avIn('quando', 'Data e hora', { req: 1, t: 'datetime-local' })
       + (restrito() ? avIn('fisio', 'Fisioterapeuta', { dis: 1 }) : avSel('fisio', 'Fisioterapeuta', fisios().map(f => [f, f]), { req: 1 }))
-      + avSel('situacao', 'Situação', AV_SITUACAO, { req: 1 }) + avSel('publico', 'Público', AV_PUBLICO, { req: 1 })
+      + avSel('situacao', 'Situação', AV_SITUACAO, { req: 1 })
       + avSel('ficha', 'Ficha (define os testes)', Object.entries(AV_FICHAS).map(([k, f]) => [k, f.nome]), { req: 1, full: 1 }))}
     ${avSecao(2, 'Anamnese',
       AV_ANAM.map(([k, l]) => avTx(k, l)).join('')
@@ -200,7 +199,7 @@ function avAtualizar(semRascunho){
   f.querySelectorAll('details.tst').forEach(t => { const ok = tem(t); t.querySelector('.selo').hidden = !ok; if (ok) nTestes++; });
   f.querySelectorAll('details.grp').forEach(g => { const n = [...g.querySelectorAll('details.tst')].filter(t => !t.querySelector('.selo').hidden).length; const c = g.querySelector('.cnt'); c.hidden = !n; c.textContent = n + (n > 1 ? ' preenchidos' : ' preenchido'); });
   f.querySelectorAll('details.avsec[data-s]').forEach(s => { const sl = s.querySelector(':scope > summary .selo'); if (!sl) return;
-    const n = s.dataset.s; const ok = n === '1' ? ['pnome','quando','fisio','situacao','publico','ficha'].every(k => v[k]) : n === '3' ? !!(v.altura && v.massa) : n === '5' ? !!(v.diagfisio && v.objetivos) : tem(s);
+    const n = s.dataset.s; const ok = n === '1' ? ['pnome','quando','fisio','situacao','ficha'].every(k => v[k]) : n === '3' ? !!(v.altura && v.massa) : n === '5' ? !!(v.diagfisio && v.objetivos) : tem(s);
     sl.hidden = !ok; });
   const cnt = $('#avCnt'); if (cnt) cnt.textContent = nTestes ? nTestes + (nTestes > 1 ? ' testes preenchidos' : ' teste preenchido') : 'nenhum teste preenchido';
   // a ficha define quais grupos de testes aparecem
@@ -257,7 +256,7 @@ function gerarPdfAvaliacao(x){
   escreve('AP Fisioterapia Domiciliar', { size: 10, after: 6, align: 'center', cor: 90 });
   titulo('1. Dados principais');
   campo('Paciente', x.pnome); linhaKV([['Data', quando], ['Fisioterapeuta', v.fisio || x.fisio]]);
-  linhaKV([['Situação', v.situacao ? rotulo(AV_SITUACAO, v.situacao) : ''], ['Público', v.publico ? rotulo(AV_PUBLICO, v.publico) : ''], ['Ficha', AV_FICHAS[v.ficha]?.nome || '']]);
+  linhaKV([['Situação', v.situacao ? rotulo(AV_SITUACAO, v.situacao) : ''], ['Ficha', AV_FICHAS[v.ficha]?.nome || '']]);
 
   const anam = [...AV_ANAM, ['comorb', 'Comorbidades'], ...AV_ANAM2];
   if (anam.some(([k]) => v[k]) || v.evolucao || v.respiracao || v.protese){
