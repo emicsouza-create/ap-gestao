@@ -121,6 +121,28 @@ function imcRef(idade){
     ? { fonte: 'Lipschitz, 1994 (60 anos ou mais)', min: 14, max: 40, cortes: [[0, 'Baixo peso'], [22, 'Eutrofia'], [27, 'Sobrepeso', 'gt']] }
     : { fonte: 'OMS (adultos)', min: 14, max: 40, cortes: [[0, 'Baixo peso'], [18.5, 'Eutrofia'], [25, 'Sobrepeso'], [30, 'Obesidade']] };
 }
+// Força de preensão palmar: equações de Novaes et al., 2009 (Fisioterapia e Pesquisa 16(3):217-22),
+// brasileiros com 50 anos ou mais, dinamômetro, maior de 3 tentativas. Sexo: 1 homem, 0 mulher.
+// Mão dominante: 39,996 − 0,382×idade + 0,174×peso + 13,628×sexo
+// Mão não dominante: 44,968 − 0,420×idade + 0,110×peso + 9,274×sexo
+// Força reduzida pelo EWGSOP2 (Cruz-Jentoft et al., 2019): abaixo de 27 kgf (homens) e 16 kgf (mulheres), no maior valor.
+function avPreensao(v, c){
+  const M = avMaos(v), t = {}; if (!M.lista.length) return t;
+  const falta = []; if (!c.sexo) falta.push('sexo'); if (c.idade == null) falta.push('data de nascimento'); if (c.peso == null) falta.push('massa');
+  if (!v.t_preensao_dom) falta.push('mão dominante');
+  if (falta.length) t.falta = falta;
+  else {
+    const s = c.sexo === 'M' ? 1 : 0;
+    const pD = 39.996 - 0.382 * c.idade + 0.174 * c.peso + 13.628 * s, pND = 44.968 - 0.420 * c.idade + 0.110 * c.peso + 9.274 * s;
+    t.maos = M.lista.map(([l, val]) => { const dom = (l === 'direita' ? 'dir' : 'esq') === v.t_preensao_dom, pred = dom ? pD : pND; return { l, val, dom, pred, pct: pred > 0 ? val / pred * 100 : null }; });
+    const principal = t.maos.find(m => m.dom) || t.maos[0];
+    t.pred = principal.pred; t.maoPct = principal.l; t.fonte = 'Novaes et al., 2009';
+    if (c.idade < 50) t.aviso = 'equação feita com pessoas de 50 anos ou mais: valor extrapolado';
+  }
+  if (c.sexo){ const mx = Math.max(...M.lista.map(x => x[1])), corte = c.sexo === 'M' ? 27 : 16;
+    t.cls = mx < corte ? `Força reduzida (maior valor abaixo de ${corte} kgf)` : `Força adequada (maior valor a partir de ${corte} kgf)`; t.fonteCls = 'EWGSOP2, Cruz-Jentoft et al., 2019'; t.corte = corte; }
+  return t;
+}
 function classifica(val, def){ let r = null; def.cortes.forEach(([c, l, gt]) => { if (gt ? val > c : val >= c) r = l; }); return r; }
 // calcula tudo a partir do que foi digitado
 function avCalc(v){
@@ -137,7 +159,8 @@ function avCalc(v){
       else { t.pred = R.pred(c); t.fonte = R.fonte; if (R.lin) t.lin = R.lin(c, t.pred);
         if (c.idade < R.faixa[0] || c.idade > R.faixa[1]) t.aviso = `idade fora da faixa estudada (${R.faixa[0]} a ${R.faixa[1]} anos): valor extrapolado`; }
       t.menorMelhor = !!R.menorMelhor;
-    } else if (temPred){ const p = num(v[`t_${id}_p`]); if (p) t.pred = p; }
+    } else if (id === 'preensao' && v.t_preensao_mao){ Object.assign(t, avPreensao(v, c)); if (t.pred == null){ const p = num(v[`t_${id}_p`]); if (p){ t.pred = p; t.manual = true; } } }
+    else if (temPred){ const p = num(v[`t_${id}_p`]); if (p) t.pred = p; }
     if (r != null && t.pred > 0){ t.pct = r / t.pred * 100; if (t.lin != null) t.abaixoLin = r < t.lin; }
     if (C && r != null){ t.cls = classifica(r, C); t.fonteCls = C.fonte; }
     if (Object.keys(t).length) out.testes[id] = t;
@@ -185,7 +208,8 @@ function avTeste([id, nome, un, pred, tipo]){
   if (id === 'preensao') corpo = avSel('t_preensao_mao', 'Mão testada', AV_MAO) + avSel('t_preensao_dom', 'Mão dominante', [['dir','Direita'],['esq','Esquerda']])
     + avIn('t_preensao_d', `Mão direita (${un})`, { t: 'number' }).replace('<label class="', '<label data-mao="dir" class="')
     + avIn('t_preensao_e', `Mão esquerda (${un})`, { t: 'number' }).replace('<label class="', '<label data-mao="esq" class="')
-    + avIn(`t_${id}_p`, `Predito (${un})`, { t: 'number' }) + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label><p class="ref full" id="mao_${id}"></p>`
+    + avIn(`t_${id}_p`, `Predito manual (${un})`, { t: 'number' }).replace('<label class="', '<label id="lbl_pmanual" class="')
+    + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label><label class="full">Classificação<output id="cl_${id}" class="calc">—</output></label><p class="ref full" id="mao_${id}"></p>`
     + avIn(`t_${id}_o`, 'Observações', { full: 1 });
   else if (tipo === 'txt') corpo = avTx(`t_${id}_r`, 'Resultado e achados', { rows: 3 });
   else corpo = (tipo === 'extra' ? avIn(`t_${id}_n`, 'Nome do teste') + avIn(`t_${id}_u`, 'Unidade') : '')
@@ -288,7 +312,9 @@ function avAtualizar(semRascunho){
   const K = avCalc(v), set = (id, t) => { const o = document.getElementById(id); if (o) o.textContent = t; };
   set('avIdade', K.idade != null ? K.idade + ' anos' : '—');
   { const mao = v.t_preensao_mao || ''; f.querySelectorAll('[data-mao]').forEach(l => { l.hidden = !(mao === 'ambas' || mao === l.dataset.mao); });
-    const M = avMaos(v); set('mao_preensao', !mao ? 'Escolha a mão testada.' : M.lista.length > 1 ? `O % do predito usa a mão ${M.usada}${M.dom ? ' (dominante)' : ' (maior valor; marque a dominante para usar ela)'}.` : ''); }
+    const T = K.testes.preensao || {}, lp = $('#lbl_pmanual'); if (lp) lp.hidden = !T.falta && !!T.maos;
+    set('mao_preensao', !mao ? 'Escolha a mão testada.' : T.maos ? T.maos.map(m => `Mão ${m.l}${m.dom ? ' (dominante)' : ''}: predito ${fmtNum(m.pred, 2)} kgf, ${fmtNum(m.pct, 0)}% do predito`).join(' · ') + ` · Novaes et al., 2009${T.aviso ? ' · ' + T.aviso : ''}. Classificação: EWGSOP2.`
+      : T.falta ? 'Para calcular o predito, preencha: ' + T.falta.join(', ') + '. Sem isso, digite o predito manual.' : ''); }
   set('avRcq', K.rcq != null ? fmtNum(K.rcq, 2) : '—');
   // IMC = massa (kg) ÷ altura (m)²
   set('avImc', K.imc ? fmtNum(K.imc.valor, 1) : '—'); set('avImcCls', K.imc ? K.imc.cls : '—');

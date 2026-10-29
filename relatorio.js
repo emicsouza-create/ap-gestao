@@ -87,19 +87,21 @@ function gerarPdfAvaliacao(x){
   const tituloTeste = t => { fonte(10, true); const L = doc.splitTextToSize(t.toUpperCase(), IW); return { h: L.length * lh(10) + 2.5, draw: (x0, y0) => { fonte(10, true); L.forEach((l, i) => doc.text(l, x0, y0 + lh(10) * (i + 0.8))); } }; };
   // gráfico de colunas: resultado x referência
   // barras: [[nome, valor, cor], ...]; a última é a referência
-  const graficoColunas = (nome, res, ref, barras) => {
+  const graficoColunas = (nome, res, ref, barras, linha) => {
     barras = barras || [[nome, res, C.res], ['Referência', ref, C.ref]];
     const h = 50;
     return { h: h + 4, draw: (x0, y0) => {
       doc.setFillColor(...C.fundo); doc.setDrawColor(...C.borda); doc.setLineWidth(0.2); doc.roundedRect(x0, y0, IW, h, 2, 2, 'FD');
-      const base = y0 + h - 15, alto = 26, max = Math.max(...barras.map(b => b[1])) * 1.15 || 1, cx = x0 + IW / 2, bw = 6, gap = 2, x1 = cx - (barras.length * bw + (barras.length - 1) * gap) / 2;
+      const base = y0 + h - 15, alto = 26, max = Math.max(...barras.map(b => b[1]), linha ? linha[0] : 0) * 1.15 || 1, cx = x0 + IW / 2, bw = 6, gap = 2, x1 = cx - (barras.length * bw + (barras.length - 1) * gap) / 2;
       doc.setDrawColor(...C.grade); doc.setLineDashPattern([0.8, 0.8], 0);
       for (let i = 0; i <= 3; i++){ const gy = base - alto * i / 3; doc.line(x0 + 30, gy, x0 + IW - 30, gy); }
       doc.setLineDashPattern([], 0);
-      barras.forEach(([, val, cor], i) => { const bx = x1 + i * (bw + gap), ref = barras[i][0] === 'Referência';
+      barras.forEach(([, val, cor], i) => { const bx = x1 + i * (bw + gap), ref = /^(Referência|Predito)/.test(barras[i][0]);
         const bh = Math.max(0.6, val / max * alto); doc.setFillColor(...cor); doc.rect(bx, base - bh, bw, bh, 'F');
         fonte(7.5, true, ref ? C.mut : C.tx); doc.text(fmtNum(val, val < 10 ? 2 : 0), bx + bw / 2, base - bh - 1.6, { align: 'center' });
       });
+      if (linha){ const ly0 = base - linha[0] / max * alto; doc.setDrawColor(178, 59, 59); doc.setLineWidth(0.35); doc.setLineDashPattern([1.2, 0.8], 0); doc.line(x0 + 30, ly0, x0 + IW - 30, ly0); doc.setLineDashPattern([], 0);
+        fonte(6.5, false, [178, 59, 59]); doc.text(linha[1], x0 + IW - 30, ly0 - 1, { align: 'right' }); }
       fonte(7, false, C.mut); doc.text(dataAv, cx, base + 4, { align: 'center' });
       const ly = base + 10; fonte(6.8, false, C.mut);
       const tot = barras.reduce((a, b) => a + 4 + doc.getTextWidth(b[0]) + 8, -8); let lx = cx - tot / 2;
@@ -220,11 +222,13 @@ function gerarPdfAvaliacao(x){
         itens.push(espaco(1.5));
         const maos = id === 'preensao' ? avMaos(v) : null;
         if (maos && maos.lista.length){
-          itens.push(paragrafo(maos.lista.map(([l, val]) => `Mão ${l}: ${fmtNum(val, 2)} ${u}`).join('; ') + (maos.dom ? `; mão dominante: ${maos.dom}` : '') + '.'));
-          if (t.pct != null && maos.lista.length > 1) itens.push(paragrafo(`O % do predito usa a mão ${maos.usada}.`, { s: 7.4, it: true, cor: C.mut }));
+          if (t.maos) t.maos.forEach(m => itens.push(paragrafo(`Mão ${m.l}${m.dom ? ' (dominante)' : ' (não dominante)'}: ${fmtNum(m.val, 2)} ${u}; predito ${fmtNum(m.pred, 2)} ${u}; ${fmtNum(m.pct, 0)}% do predito.`)));
+          else itens.push(paragrafo(maos.lista.map(([l, val]) => `Mão ${l}: ${fmtNum(val, 2)} ${u}`).join('; ') + (maos.dom ? `; mão dominante: ${maos.dom}` : '') + '.'));
+          if (t.corte) itens.push(paragrafo(`Ponto de corte para força reduzida: ${t.corte} kgf (EWGSOP2).`, { s: 7.4, it: true, cor: C.mut }));
         }
         // preensão: gráfico com as mãos testadas, com a referência quando houver predito
-        if (maos && maos.lista.length) itens.push(graficoColunas('', 0, 0, [...maos.lista.map(([l, val]) => ['Mão ' + l, val, l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]]), ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
+        if (maos && t.maos) itens.push(graficoColunas('', 0, 0, t.maos.flatMap(m => [['Mão ' + m.l, m.val, m.l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]], ['Predito ' + m.l, m.pred, C.ref]]), t.corte ? [t.corte, `corte EWGSOP2: ${t.corte} kgf`] : null));
+        else if (maos && maos.lista.length) itens.push(graficoColunas('', 0, 0, [...maos.lista.map(([l, val]) => ['Mão ' + l, val, l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]]), ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
         else if (r != null && t.pred > 0) itens.push(graficoColunas(tipo === 'extra' ? 'Resultado' : nm.split(' (')[0].length <= 14 ? nm : 'Resultado', r, t.pred));
         else if (r != null && t.cls) itens.push(graficoFaixa(r, AV_CLS[id], u, t.cls));
       }
