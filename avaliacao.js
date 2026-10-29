@@ -59,10 +59,12 @@ const AV_COMORB = [['neuro','Neurológica'],['resp','Respiratória'],['cardio','
 const AV_GRUPOS = [
   { g: 'mob', t: 'Mobilidade e queda', itens: [['tug','TUG','s',1],['vmarcha','Velocidade de marcha','m/s',1],['sppb','SPPB','pontos',0],['tls5','TLS5rep','s',1],['tls30','TLS30s','repetições',1],['fssicu','FSS-ICU','pontos',0],['ims','IMS','pontos',0]] },
   { g: 'forca', t: 'Força', itens: [['rm1','1RM','kg',1],['preensao','Preensão palmar','kgf',1],['dina','Dinamometria','kgf',1],['dinaq','Dinamometria de quadríceps','kgf',1],['mrc','MRC','pontos',0]] },
-  { g: 'pulm', t: 'Função pulmonar', itens: [['cvf','CVF','L',1],['vef1','VEF1','L',1],['pfe','PFE','L/min',1],['pft','Pico de fluxo de tosse','L/min',1],['pimax','PiMax','cmH2O',1],['pemax','PeMax','cmH2O',1],['sindex','S-Index','cmH2O',1],['endur','Endurance respiratório','',1]] },
+  { g: 'pulm', t: 'Função pulmonar', itens: [['cvf','CVF','L',1],['vef1','VEF1','L',1],['pfe','PFE','L/min',1],['pft','Pico de fluxo de tosse','L/min',1],['pimax','PiMax','cmH2O',1],['snip','SNIP','cmH2O',0],['pemax','PeMax','cmH2O',1],['sindex','S-Index','cmH2O',1],['endur','Endurance respiratório','',1]] },
   { g: 'cardio', t: 'Aptidão cardiorrespiratória', itens: [['tc6','TC6','m',1],['td6','TD6','',1],['iswt','ISWT','m',1],['chester','Chester Step','',1],['tls1','TLS 1 min','repetições',1],['tc2','TC2','',1],['risco','Estratificação de risco','',0,'txt']] },
   { g: 'vfc', t: 'VFC', itens: [['vfc','Variabilidade da frequência cardíaca','',0,'txt']] },
-  { g: 'us', t: 'Ultrassom', itens: [['uspl','Pleuropulmonar','',0,'txt'],['usdia','Diafragmático','',0,'txt'],['usme','Musculoesquelético','',0,'txt']] },
+  { g: 'us', t: 'Ultrassom', itens: [['uspl','Pleuropulmonar','',0,'txt'],['usdia','Diafragmático','',0,'txt'],['usme','Musculoesquelético','',0,'txt'],['lus','Escore de ultrassom pulmonar (LUS)','pontos',0]] },
+  { g: 'func', t: 'Funcionalidade', itens: [['barthel','Índice de Barthel','pontos',0],['mif','MIF','pontos',0],['fss','FSS','pontos',0]] },
+  { g: 'sono', t: 'Sono', itens: [['ess','Escala de sonolência de Epworth','pontos',0],['stopbang','STOP-Bang','pontos',0],['psqi','PSQI','pontos',0],['berlim','Questionário de Berlim','',0,'txt'],['mallampati','Mallampati','',0,'txt'],['polisso','Polissonografia','',0,'txt'],['pap','Terapia com PAP','',0,'txt']] },
   { g: 'esc', t: 'Escalas', itens: [['sf36','SF-36','pontos',0],['whoqol','WHOQOL-BREF','pontos',0],['cat','CAT','pontos',0],['act','ACT','pontos',0],['alsfrs','ALSFRS-R','pontos',0]] },
   { g: 'extra', t: 'Testes extras', itens: [['x1','Teste extra 1','',1,'extra'],['x2','Teste extra 2','',1,'extra'],['x3','Teste extra 3','',1,'extra'],['x4','Teste extra 4','',1,'extra']] }
 ];
@@ -78,7 +80,7 @@ function avPacientes(){
   else Object.values(S.pacientes).filter(p => p.status !== 'inativo').forEach(p => m.set(p.nome, { nome: p.nome, pid: p._id }));
   return [...m.values()].sort((a, b) => a.nome.localeCompare(b.nome));
 }
-let avT = null, avLista = null, avAtual = null, avTodos = false, avCarregando = false;
+let avT = null, avLista = null, avAtual = null, avCarregando = false;
 const num = s => { const n = Number(String(s ?? '').replace(',', '.')); return s === '' || s == null || !isFinite(n) ? null : n; };
 const fmtNum = (n, c = 1) => n == null ? '' : n.toLocaleString('pt-BR', { maximumFractionDigits: c });
 const rotulo = (L, k) => (L.find(x => x[0] === k) || [k, k])[1];
@@ -109,6 +111,9 @@ const AV_CLS = {
   mrc: { fonte: 'De Jonghe et al., 2002; Hermans et al., 2012', min: 0, max: 60, cortes: [[0, 'Fraqueza grave'], [36, 'Fraqueza'], [48, 'Sem fraqueza']] },
   pft: { fonte: 'Bach, 1996', min: 0, max: 600, cortes: [[0, 'Tosse ineficaz'], [160, 'Risco nas infecções'], [270, 'Adequada']] },
   cat: { fonte: 'Jones et al., 2009', min: 0, max: 40, cortes: [[0, 'Impacto baixo'], [10, 'Médio'], [21, 'Alto'], [31, 'Muito alto']] },
+  ess: { fonte: 'Johns, 1991', min: 0, max: 24, cortes: [[0, 'Normal'], [10, 'Sonolência excessiva', 'gt']] },
+  stopbang: { fonte: 'Chung et al., 2012', min: 0, max: 8, cortes: [[0, 'Risco baixo'], [3, 'Risco intermediário'], [5, 'Risco alto']] },
+  psqi: { fonte: 'Buysse et al., 1989', min: 0, max: 21, cortes: [[0, 'Boa qualidade do sono'], [5, 'Má qualidade do sono', 'gt']] },
   act: { fonte: 'Nathan et al., 2004', min: 5, max: 25, cortes: [[5, 'Não controlada'], [20, 'Controlada']] }
 };
 function imcRef(idade){
@@ -122,6 +127,7 @@ function avCalc(v){
   const c = avCtx(v), out = { idade: c.idade, testes: {} };
   if (c.alt && c.peso){ const imc = c.peso / Math.pow(c.alt / 100, 2), ref = imcRef(c.idade);
     out.imc = { valor: imc, cls: classifica(imc, ref), fonte: ref.fonte, def: ref, aviso: c.idade == null ? 'sem data de nascimento: usada a tabela de adultos' : '' }; }
+  const ci = num(v.cintura), qu = num(v.quadril); if (ci && qu) out.rcq = ci / qu;
   AV_GRUPOS.forEach(G => G.itens.forEach(([id, , , temPred, tipo]) => {
     if (tipo === 'txt') return;
     const r = num(v[`t_${id}_r`]), R = AV_REF[id], C = AV_CLS[id], t = {};
@@ -203,7 +209,7 @@ function avForm(id, base){
       + avSel('situacao', 'Situação', AV_SITUACAO, { req: 1 })
       + avSel('sexo', 'Sexo', AV_SEXO, { req: 1 })
       + avIn('nasc', 'Data de nascimento', { t: 'date' }) + '<label>Idade<output id="avIdade" class="calc">—</output></label>'
-      + avSel('ficha', 'Ficha (define os testes)', Object.entries(AV_FICHAS).map(([k, f]) => [k, f.nome]), { req: 1, full: 1 }))}
+      + avSel('ficha', 'Ficha', Object.entries(AV_FICHAS).map(([k, f]) => [k, f.nome]), { req: 1, full: 1 }))}
     ${avSecao(2, 'Anamnese',
       AV_ANAM.map(([k, l]) => avTx(k, l)).join('')
       + avChk('comorb', 'Comorbidades', AV_COMORB)
@@ -216,14 +222,16 @@ function avForm(id, base){
       + avIn('altura', 'Altura (cm)', { req: 1, t: 'number' }) + avIn('massa', 'Massa (kg)', { req: 1, t: 'number' })
       + '<label>IMC (calculado)<output id="avImc" class="calc">—</output></label><label>Classificação do IMC<output id="avImcCls" class="calc">—</output></label><p class="ref full" id="avImcRef"></p>'
       + avIn('pescoco', 'Circunferência do pescoço (cm)', { t: 'number' })
+      + avIn('cintura', 'Circunferência da cintura (cm)', { t: 'number' }) + avIn('quadril', 'Circunferência do quadril (cm)', { t: 'number' })
+      + '<label>Relação cintura-quadril (calculada)<output id="avRcq" class="calc">—</output></label>'
       + avIn('fonte', 'Fonte dos dados', { full: 1, ph: 'Ex.: medido na avaliação, informado pela família' }))}
     <details class="avsec" data-s="4" open><summary><span class="nm">4. Testes</span><span class="chip mute" id="avCnt"></span></summary>
-      <p class="sub" id="avFichaMsg" style="margin:8px 0"></p>
-      ${AV_GRUPOS.map(G => `<details class="grp" data-g="${G.g}"><summary><span class="nm">${esc(G.t)}</span><span class="chip ok cnt" hidden></span></summary>${G.itens.map(avTeste).join('')}</details>`).join('')}
-      <button type="button" class="btn sm ghost" data-act="av-todos" id="avTodosBtn"></button>
+      <p class="sub" style="margin:8px 14px">Marque os testes que você vai fazer. Só os marcados abrem para preencher e entram no relatório.</p>
+      <div class="tsel">${AV_GRUPOS.map(G => `<div class="tgrp"><div class="tgt">${esc(G.t)}</div><div class="pills">${G.itens.map(([id, nome]) => `<label class="pill"><input type="checkbox" data-k="testes" data-multi="1" value="${id}" ${avMarcados().includes(id) ? 'checked' : ''}><span>${esc(nome)}</span></label>`).join('')}</div></div>`).join('')}</div>
+      <div id="avTestes">${AV_GRUPOS.map(G => `<div class="grp" data-g="${G.g}"><div class="tgt">${esc(G.t)}</div>${G.itens.map(avTeste).join('')}</div>`).join('')}</div>
     </details>
     ${avSecao(5, 'Conclusão',
-      avTx('diagfisio', 'Diagnóstico fisioterapêutico', { rows: 4 }) + avTx('objetivos', 'Objetivos terapêuticos', { rows: 3 }) + avTx('condutas', 'Condutas (opcional)', { rows: 3 }))}
+      avTx('diagfisio', 'Diagnóstico fisioterapêutico', { rows: 4 }) + avTx('objetivos', 'Objetivos terapêuticos', { rows: 3 }) + avTx('conclusao', 'Conclusão', { rows: 4 }))}
     </form>
     <p class="sub" id="avMsg" style="margin:0;color:var(--bad)" hidden></p>
     <div class="foot">${id && isAdmin ? `<button type="button" class="btn ghost" data-act="av-del" data-id="${id}">Excluir</button>` : ''}
@@ -232,7 +240,13 @@ function avForm(id, base){
       ${ro ? '' : `<button type="button" class="btn" data-act="av-salvar">Salvar rascunho</button><button type="button" class="btn pri" data-act="av-final">${fin ? 'Salvar e gerar PDF' : 'Finalizar e gerar PDF'}</button>`}</div></div>`;
   if (ro) d.querySelectorAll('#avForm input,#avForm select,#avForm textarea').forEach(el => el.disabled = true);
   if (!d.open) d.showModal();
-  avTodos = false; avAtualizar(true);
+  avAtualizar(true);
+}
+// testes marcados; avaliações antigas (sem a lista) consideram marcados os que têm algum valor
+function avMarcados(v){
+  v = v || avAtual.av || {};
+  if (Array.isArray(v.testes)) return v.testes;
+  const L = []; AV_GRUPOS.forEach(G => G.itens.forEach(([id]) => { if (['r', 'p', 'o', 'n'].some(s => v[`t_${id}_${s}`])) L.push(id); })); return L;
 }
 document.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.k === 'pnome' && e.target.closest('#avForm')){ const v = { pnome: e.target.value }; if (avNascCadastro(v)){ const n = $('#avForm [data-k="nasc"]'); if (n && !n.value){ n.value = v.nasc; avAtualizar(); } } } });
 function avNascCadastro(v){
@@ -255,6 +269,7 @@ function avAtualizar(semRascunho){
   const f = $('#avForm'); if (!f) return; const v = avLer();
   const K = avCalc(v), set = (id, t) => { const o = document.getElementById(id); if (o) o.textContent = t; };
   set('avIdade', K.idade != null ? K.idade + ' anos' : '—');
+  set('avRcq', K.rcq != null ? fmtNum(K.rcq, 2) : '—');
   // IMC = massa (kg) ÷ altura (m)²
   set('avImc', K.imc ? fmtNum(K.imc.valor, 1) : '—'); set('avImcCls', K.imc ? K.imc.cls : '—');
   set('avImcRef', K.imc ? K.imc.fonte + (K.imc.aviso ? ' · ' + K.imc.aviso : '') : '');
@@ -268,18 +283,15 @@ function avAtualizar(semRascunho){
   // selos "Preenchido"
   const tem = el => [...el.querySelectorAll('[data-k]')].some(i => i.dataset.multi ? i.checked : (i.value || '').trim() !== '');
   let nTestes = 0;
-  f.querySelectorAll('details.tst').forEach(t => { const ok = tem(t); t.querySelector('.selo').hidden = !ok; if (ok) nTestes++; });
-  f.querySelectorAll('details.grp').forEach(g => { const n = [...g.querySelectorAll('details.tst')].filter(t => !t.querySelector('.selo').hidden).length; const c = g.querySelector('.cnt'); c.hidden = !n; c.textContent = n + (n > 1 ? ' preenchidos' : ' preenchido'); });
+  f.querySelectorAll('details.tst').forEach(t => { const ok = tem(t); t.querySelector('.selo').hidden = !ok; if (ok && !t.hidden) nTestes++; });
+  // só aparecem os testes marcados; o que acabou de ser marcado já abre
+  const marc = v.testes || [];
+  f.querySelectorAll('details.tst').forEach(t => { const on = marc.includes(t.dataset.t); if (on && t.hidden) t.open = true; t.hidden = !on; });
+  f.querySelectorAll('#avTestes .grp').forEach(g => { g.hidden = !g.querySelector('details.tst:not([hidden])'); });
   f.querySelectorAll('details.avsec[data-s]').forEach(s => { const sl = s.querySelector(':scope > summary .selo'); if (!sl) return;
     const n = s.dataset.s; const ok = n === '1' ? ['pnome','quando','fisio','situacao','sexo','ficha'].every(k => v[k]) : n === '3' ? !!(v.altura && v.massa) : n === '5' ? !!(v.diagfisio && v.objetivos) : tem(s);
     sl.hidden = !ok; });
-  const cnt = $('#avCnt'); if (cnt) cnt.textContent = nTestes ? nTestes + (nTestes > 1 ? ' testes preenchidos' : ' teste preenchido') : 'nenhum teste preenchido';
-  // a ficha define quais grupos de testes aparecem
-  const fi = AV_FICHAS[v.ficha];
-  f.querySelectorAll('details.grp').forEach(g => { const vis = avTodos || !fi || !fi.grupos || fi.grupos.includes(g.dataset.g) || !g.querySelector('.cnt').hidden; g.hidden = !vis; });
-  const msg = $('#avFichaMsg'), bt = $('#avTodosBtn');
-  if (msg) msg.textContent = !fi ? 'Escolha a ficha no bloco 1 para ver só os testes dela.' : fi.grupos ? `A ficha ${fi.nome} ainda não tem testes definidos. Aparecem só os testes extras.` : `Testes da ficha ${fi.nome}.`;
-  if (bt){ bt.hidden = !fi || !fi.grupos; bt.textContent = avTodos ? 'Mostrar só os testes da ficha' : 'Mostrar todos os testes'; }
+  const cnt = $('#avCnt'); if (cnt) cnt.textContent = marc.length ? `${marc.length} marcado${marc.length > 1 ? 's' : ''} · ${nTestes} preenchido${nTestes !== 1 ? 's' : ''}` : 'nenhum teste marcado';
   if (!semRascunho){ clearTimeout(avT); avT = setTimeout(() => { try { localStorage.setItem('ap.avDraft.' + (avAtual._id || 'novo'), JSON.stringify({ av: avLer(), em: new Date().toISOString() })); } catch(e){} }, 400); }
 }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#avForm')) avAtualizar(); });
@@ -311,7 +323,6 @@ async function avAcao(a, id, b){
   if (a === 'ditar') return ditar(b.dataset.alvo, b);
   if (a === 'av-new') return avForm(null);
   if (a === 'av-edit') return avForm(id);
-  if (a === 'av-todos'){ avTodos = !avTodos; return avAtualizar(true); }
   if (a === 'av-salvar') return avSalvar(false);
   if (a === 'av-final') return avSalvar(true);
   if (a === 'av-pdf'){ const x = (avLista || []).find(y => y._id === id); if (x) gerarPdfAvaliacao(x); return; }

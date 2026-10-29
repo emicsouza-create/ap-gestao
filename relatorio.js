@@ -29,10 +29,18 @@ const AV_DESC = {
   act: 'Questionário de 5 itens sobre o controle da asma nas últimas 4 semanas, de 5 a 25 pontos.',
   alsfrs: 'Escala funcional da ELA revisada: 12 itens sobre fala, deglutição, motricidade e respiração, de 0 a 48 pontos.',
   sf36: 'Questionário de qualidade de vida com 8 domínios.',
-  whoqol: 'Questionário de qualidade de vida da OMS, versão abreviada, com 26 itens.'
+  whoqol: 'Questionário de qualidade de vida da OMS, versão abreviada, com 26 itens.',
+  snip: 'Pressão inspiratória nasal medida durante uma fungada máxima, pela narina.',
+  barthel: 'Avalia a independência em 10 atividades básicas de vida diária, de 0 a 100 pontos.',
+  mif: 'Medida de independência funcional: 18 itens motores e cognitivos, de 18 a 126 pontos.',
+  ess: 'Questionário sobre a chance de cochilar em 8 situações do dia a dia, de 0 a 24 pontos.',
+  stopbang: 'Questionário de 8 itens de rastreio da apneia obstrutiva do sono: ronco, cansaço, apneia observada, pressão alta, IMC, idade, pescoço e sexo.',
+  psqi: 'Questionário sobre a qualidade do sono no último mês, de 0 a 21 pontos.',
+  berlim: 'Questionário de rastreio de risco para apneia obstrutiva do sono.',
+  mallampati: 'Classificação da via aérea pela visualização da orofaringe, de I a IV.'
 };
 const AV_GRUPO_TITULO = { mob: 'Testes para Avaliação da Mobilidade e Risco de Queda', forca: 'Testes para Avaliação da Força Muscular', pulm: 'Testes para Avaliação da Função Pulmonar',
-  cardio: 'Testes para Avaliação da Aptidão Cardiorrespiratória', vfc: 'Variabilidade da Frequência Cardíaca', us: 'Ultrassonografia', esc: 'Escalas e Questionários', extra: 'Outros Testes' };
+  cardio: 'Testes para Avaliação da Aptidão Cardiorrespiratória', vfc: 'Variabilidade da Frequência Cardíaca', us: 'Ultrassonografia', esc: 'Escalas e Questionários', func: 'Testes para Avaliação da Funcionalidade', sono: 'Avaliação do Sono', extra: 'Outros Testes' };
 
 function gerarPdfAvaliacao(x){
   const J = window.jspdf && window.jspdf.jsPDF;
@@ -167,6 +175,9 @@ function gerarPdfAvaliacao(x){
   if (v.massa) linhas.push(['Massa corporal', fmtNum(num(v.massa), 1) + ' kg', '—']);
   if (K.imc) linhas.push(['IMC', fmtNum(K.imc.valor, 2) + ' kg/m²', K.imc.cls]);
   if (v.pescoco) linhas.push(['Circunferência do pescoço', fmtNum(num(v.pescoco), 1) + ' cm', '—']);
+  if (v.cintura) linhas.push(['Circunferência da cintura', fmtNum(num(v.cintura), 1) + ' cm', '—']);
+  if (v.quadril) linhas.push(['Circunferência do quadril', fmtNum(num(v.quadril), 1) + ' cm', '—']);
+  if (K.rcq != null) linhas.push(['Relação cintura-quadril', fmtNum(K.rcq, 2), '—']);
   cartao('Composição corporal', [linhas.length && tabela(['Indicador', dataAv, 'Classificação'], linhas),
     K.imc && paragrafo(`Classificação do IMC: ${K.imc.fonte}${K.imc.aviso ? '. Atenção: ' + K.imc.aviso : ''}.`, { s: 7.2, cor: C.mut, it: true }),
     v.fonte && paragrafo('Fonte dos dados: ' + v.fonte, { s: 7.2, cor: C.mut, it: true })]);
@@ -175,7 +186,9 @@ function gerarPdfAvaliacao(x){
   AV_GRUPOS.forEach(G => {
     let itens = [];
     G.itens.forEach(([id, nome, u0, , tipo]) => {
-      const tem = ['r', 'p', 'o', 'n'].some(s => v[`t_${id}_${s}`]); if (!tem) return;
+      // só entram os testes marcados na avaliação
+      if (!avMarcados(v).includes(id)) return;
+      const tem = ['r', 'p', 'o', 'n'].some(s => v[`t_${id}_${s}`]);
       const t = K.testes[id] || {}, u = tipo === 'extra' ? (v[`t_${id}_u`] || '') : u0, nm = tipo === 'extra' ? (v[`t_${id}_n`] || nome) : nome;
       const todos = itens; itens = [];
       if (todos.length) itens.push(espaco(4));
@@ -183,7 +196,8 @@ function gerarPdfAvaliacao(x){
       const refs = [t.fonte, t.fonteCls].filter(Boolean).join('; ');
       const desc = [AV_DESC[id] || '', refs ? `(${refs})` : ''].filter(Boolean).join(' ');
       if (desc) itens.push(paragrafo(desc), espaco(1.5));
-      if (tipo === 'txt'){ if (v[`t_${id}_r`]) itens.push(paragrafo(v[`t_${id}_r`])); }
+      if (!tem) itens.push(paragrafo('Resultado não registrado.', { s: 8, it: true, cor: C.mut }));
+      else if (tipo === 'txt'){ if (v[`t_${id}_r`]) itens.push(paragrafo(v[`t_${id}_r`])); }
       else {
         const r = num(v[`t_${id}_r`]);
         const partes = [r != null ? `Valor obtido: ${un(fmtNum(r, 2), u)}` : '', t.pct != null ? `${fmtNum(t.pct, 0)}% do predito` : '',
@@ -203,11 +217,11 @@ function gerarPdfAvaliacao(x){
   });
 
   // ----- planejamento -----
-  if (v.diagfisio || v.objetivos || v.condutas){
+  if (v.diagfisio || v.objetivos || v.conclusao){
     cabecalhoGrupo('Planejamento e Diagnóstico');
     if (v.diagfisio) cartao('Diagnóstico fisioterapêutico', [paragrafo(v.diagfisio)]);
     if (v.objetivos) cartao('Objetivos terapêuticos', [paragrafo(v.objetivos)]);
-    if (v.condutas) cartao('Condutas', [paragrafo(v.condutas)]);
+    if (v.conclusao) cartao('Conclusão', [paragrafo(v.conclusao)]);
   }
   { if (y + 15 > 290) novaPagina(); y += 2; doc.setDrawColor(...C.borda); doc.setFillColor(255, 255, 255); doc.roundedRect(M, y, W, 13, 2.5, 2.5, 'FD');
     fonte(8, false, C.mut); const pre = 'Profissional responsável: '; doc.text(pre, M + PAD + 2, y + 8); fonte(8, true, C.barra); doc.text(v.fisio || x.fisio || '', M + PAD + 2 + doc.getTextWidth(pre) + 0.5, y + 8); }
