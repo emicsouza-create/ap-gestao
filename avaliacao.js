@@ -159,7 +159,7 @@ function avCalc(v){
       else { t.pred = R.pred(c); t.fonte = R.fonte; if (R.lin) t.lin = R.lin(c, t.pred);
         if (c.idade < R.faixa[0] || c.idade > R.faixa[1]) t.aviso = `idade fora da faixa estudada (${R.faixa[0]} a ${R.faixa[1]} anos): valor extrapolado`; }
       t.menorMelhor = !!R.menorMelhor;
-    } else if (id === 'preensao' && v.t_preensao_mao){ Object.assign(t, avPreensao(v, c)); if (t.pred == null){ const p = num(v[`t_${id}_p`]); if (p){ t.pred = p; t.manual = true; } } }
+    } else if (id === 'preensao' && avMaos(v).lista.length){ Object.assign(t, avPreensao(v, c)); if (t.pred == null){ const p = num(v[`t_${id}_p`]); if (p){ t.pred = p; t.manual = true; } } }
     else if (temPred){ const p = num(v[`t_${id}_p`]); if (p) t.pred = p; }
     if (r != null && t.pred > 0){ t.pct = r / t.pred * 100; if (t.lin != null) t.abaixoLin = r < t.lin; }
     if (C && r != null){ t.cls = classifica(r, C); t.fonteCls = C.fonte; }
@@ -197,7 +197,8 @@ const AV_MAO = [['dir','Direita'],['esq','Esquerda'],['ambas','As duas']];
 // preensão palmar: mãos testadas e qual valor entra no % do predito (a dominante; sem dominante, a maior)
 function avMaos(v){
   const m = v.t_preensao_mao, d = num(v.t_preensao_d), e = num(v.t_preensao_e), dom = v.t_preensao_dom;
-  const lista = []; if ((m === 'dir' || m === 'ambas') && d != null) lista.push(['direita', d]); if ((m === 'esq' || m === 'ambas') && e != null) lista.push(['esquerda', e]);
+  // sem a mão marcada, valem os campos preenchidos
+  const lista = []; if ((!m || m === 'dir' || m === 'ambas') && d != null) lista.push(['direita', d]); if ((!m || m === 'esq' || m === 'ambas') && e != null) lista.push(['esquerda', e]);
   let usada = '', r = null;
   if (lista.length === 1){ usada = lista[0][0]; r = lista[0][1]; }
   else if (lista.length === 2){ const p = dom === 'dir' ? lista[0] : dom === 'esq' ? lista[1] : (d >= e ? lista[0] : lista[1]); usada = p[0]; r = p[1]; }
@@ -303,7 +304,7 @@ function avLer(){
   Object.keys(v).forEach(k => { if (Array.isArray(v[k]) && !v[k].length) delete v[k]; });
   if (restrito()) v.fisio = minhaFisio;
   // preensão palmar: o resultado usado no cálculo vem das mãos escolhidas
-  if (v.t_preensao_mao){ const M = avMaos(v); if (M.r != null) v.t_preensao_r = String(M.r); else delete v.t_preensao_r; }
+  if (v.t_preensao_mao || v.t_preensao_d || v.t_preensao_e){ const M = avMaos(v); if (M.r != null) v.t_preensao_r = String(M.r); else delete v.t_preensao_r; }
   else if (avAtual && avAtual.av && avAtual.av.t_preensao_r) v.t_preensao_r = avAtual.av.t_preensao_r;
   return v;
 }
@@ -311,9 +312,9 @@ function avAtualizar(semRascunho){
   const f = $('#avForm'); if (!f) return; const v = avLer();
   const K = avCalc(v), set = (id, t) => { const o = document.getElementById(id); if (o) o.textContent = t; };
   set('avIdade', K.idade != null ? K.idade + ' anos' : '—');
-  { const mao = v.t_preensao_mao || ''; f.querySelectorAll('[data-mao]').forEach(l => { l.hidden = !(mao === 'ambas' || mao === l.dataset.mao); });
+  { const mao = v.t_preensao_mao || ''; f.querySelectorAll('[data-mao]').forEach(l => { l.hidden = !!mao && !(mao === 'ambas' || mao === l.dataset.mao); });
     const T = K.testes.preensao || {}, lp = $('#lbl_pmanual'); if (lp) lp.hidden = !T.falta && !!T.maos;
-    set('mao_preensao', !mao ? 'Escolha a mão testada.' : T.maos ? T.maos.map(m => `Mão ${m.l}${m.dom ? ' (dominante)' : ''}: predito ${fmtNum(m.pred, 2)} kgf, ${fmtNum(m.pct, 0)}% do predito`).join(' · ') + ` · Novaes et al., 2009${T.aviso ? ' · ' + T.aviso : ''}. Classificação: EWGSOP2.`
+    set('mao_preensao', !mao && !T.maos && !T.falta ? 'Escolha a mão testada e digite o valor.' : T.maos ? T.maos.map(m => `Mão ${m.l}${m.dom ? ' (dominante)' : ''}: predito ${fmtNum(m.pred, 2)} kgf, ${fmtNum(m.pct, 0)}% do predito`).join(' · ') + ` · Novaes et al., 2009${T.aviso ? ' · ' + T.aviso : ''}. Classificação: EWGSOP2.`
       : T.falta ? 'Para calcular o predito, preencha: ' + T.falta.join(', ') + '. Sem isso, digite o predito manual.' : ''); }
   set('avRcq', K.rcq != null ? fmtNum(K.rcq, 2) : '—');
   // IMC = massa (kg) ÷ altura (m)²

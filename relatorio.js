@@ -49,7 +49,8 @@ const AV_GRUPO_TITULO = { mob: 'Testes para Avaliação da Mobilidade e Risco de
 function gerarPdfAvaliacao(x){
   const J = window.jspdf && window.jspdf.jsPDF;
   if (!J){ toast('Não consegui carregar o gerador de PDF. Confira a internet e tente de novo.'); return false; }
-  const v = x.av || {}, K = x.calc && x.calc.testes ? x.calc : avCalc(v);
+  // os cálculos são refeitos sempre, com as fórmulas atuais do app
+  const v = x.av || {}, K = avCalc(v);
   const doc = new J({ unit: 'mm', format: 'a4' });
   const M = 10, W = 210 - 2 * M, TOP = 10, BOT = 285, PAD = 4, IW = W - 2 * PAD;
   const C = { tx: [31, 41, 55], mut: [107, 114, 128], borda: [226, 230, 235], fundo: [248, 249, 251], barra: [55, 65, 81], res: [20, 137, 123], ref: [196, 202, 211], grade: [229, 233, 237] };
@@ -229,6 +230,7 @@ function gerarPdfAvaliacao(x){
         // preensão: gráfico com as mãos testadas, com a referência quando houver predito
         if (maos && t.maos) itens.push(graficoColunas('', 0, 0, t.maos.flatMap(m => [['Mão ' + m.l, m.val, m.l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]], ['Predito ' + m.l, m.pred, C.ref]]), t.corte ? [t.corte, `corte EWGSOP2: ${t.corte} kgf`] : null));
         else if (maos && maos.lista.length) itens.push(graficoColunas('', 0, 0, [...maos.lista.map(([l, val]) => ['Mão ' + l, val, l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]]), ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
+        else if (id === 'preensao' && r != null) itens.push(graficoColunas('', 0, 0, [['Resultado', r, C.res], ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
         else if (r != null && t.pred > 0) itens.push(graficoColunas(tipo === 'extra' ? 'Resultado' : nm.split(' (')[0].length <= 14 ? nm : 'Resultado', r, t.pred));
         else if (r != null && t.cls) itens.push(graficoFaixa(r, AV_CLS[id], u, t.cls));
       }

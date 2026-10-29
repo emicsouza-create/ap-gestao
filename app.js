@@ -255,7 +255,7 @@ function render(){
   renderTabs();
   if (modo === 'pedido'){ if (!dlgOpen()) $('#view').innerHTML = vPedido(); return; }
   if (modo === 'carregando') return;
-  const f = {hoje:vHoje, painel:vPainel, pacientes:vPacientes, entrada:vEntrada, agenda:vAgenda, cobranca:vCobranca, equipe:vEquipe, avaliacoes:vAvaliacoes}[tab];
+  const f = {hoje:vHoje, painel:vPainel, pacientes:vPacientes, entrada:vEntrada, agenda:vAgenda, cobranca:vCobranca, equipe:vEquipe, avaliacoes: () => typeof vAvaliacoes === 'function' ? vAvaliacoes() : '<div class="empty">Carregando…</div>'}[tab];
   if (dlgOpen()) return; // não redesenha enquanto um formulário está aberto
   $('#view').innerHTML = f() + fabHtml();
 }
