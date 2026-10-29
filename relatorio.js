@@ -77,23 +77,24 @@ function gerarPdfAvaliacao(x){
   };
   const tituloTeste = t => { fonte(10, true); const L = doc.splitTextToSize(t.toUpperCase(), IW); return { h: L.length * lh(10) + 2.5, draw: (x0, y0) => { fonte(10, true); L.forEach((l, i) => doc.text(l, x0, y0 + lh(10) * (i + 0.8))); } }; };
   // gráfico de colunas: resultado x referência
-  const graficoColunas = (nome, res, ref) => {
+  // barras: [[nome, valor, cor], ...]; a última é a referência
+  const graficoColunas = (nome, res, ref, barras) => {
+    barras = barras || [[nome, res, C.res], ['Referência', ref, C.ref]];
     const h = 50;
     return { h: h + 4, draw: (x0, y0) => {
       doc.setFillColor(...C.fundo); doc.setDrawColor(...C.borda); doc.setLineWidth(0.2); doc.roundedRect(x0, y0, IW, h, 2, 2, 'FD');
-      const base = y0 + h - 15, alto = 26, max = Math.max(res, ref) * 1.15 || 1, cx = x0 + IW / 2, bw = 6;
+      const base = y0 + h - 15, alto = 26, max = Math.max(...barras.map(b => b[1])) * 1.15 || 1, cx = x0 + IW / 2, bw = 6, gap = 2, x1 = cx - (barras.length * bw + (barras.length - 1) * gap) / 2;
       doc.setDrawColor(...C.grade); doc.setLineDashPattern([0.8, 0.8], 0);
       for (let i = 0; i <= 3; i++){ const gy = base - alto * i / 3; doc.line(x0 + 30, gy, x0 + IW - 30, gy); }
       doc.setLineDashPattern([], 0);
-      [[res, C.res, cx - bw - 1], [ref, C.ref, cx + 1]].forEach(([val, cor, bx]) => {
+      barras.forEach(([, val, cor], i) => { const bx = x1 + i * (bw + gap), ref = i === barras.length - 1;
         const bh = Math.max(0.6, val / max * alto); doc.setFillColor(...cor); doc.rect(bx, base - bh, bw, bh, 'F');
-        fonte(7.5, true, val === res ? C.res : C.mut); doc.text(fmtNum(val, val < 10 ? 2 : 0), bx + bw / 2, base - bh - 1.6, { align: 'center' });
+        fonte(7.5, true, ref ? C.mut : C.tx); doc.text(fmtNum(val, val < 10 ? 2 : 0), bx + bw / 2, base - bh - 1.6, { align: 'center' });
       });
       fonte(7, false, C.mut); doc.text(dataAv, cx, base + 4, { align: 'center' });
       const ly = base + 10; fonte(6.8, false, C.mut);
-      const w1 = doc.getTextWidth(nome), w2 = doc.getTextWidth('Referência'), tot = 4 + w1 + 8 + 4 + w2, lx = cx - tot / 2;
-      doc.setFillColor(...C.res); doc.rect(lx, ly - 2.2, 2.6, 2.6, 'F'); doc.text(nome, lx + 4, ly);
-      doc.setFillColor(...C.ref); doc.rect(lx + 4 + w1 + 8, ly - 2.2, 2.6, 2.6, 'F'); doc.text('Referência', lx + 8 + w1 + 8, ly);
+      const tot = barras.reduce((a, b) => a + 4 + doc.getTextWidth(b[0]) + 8, -8); let lx = cx - tot / 2;
+      barras.forEach(([nm, , cor]) => { doc.setFillColor(...cor); doc.rect(lx, ly - 2.2, 2.6, 2.6, 'F'); doc.text(nm, lx + 4, ly); lx += 4 + doc.getTextWidth(nm) + 8; });
     } };
   };
   // faixa de classificação com marcador do resultado
@@ -200,14 +201,21 @@ function gerarPdfAvaliacao(x){
       else if (tipo === 'txt'){ if (v[`t_${id}_r`]) itens.push(paragrafo(v[`t_${id}_r`])); }
       else {
         const r = num(v[`t_${id}_r`]);
-        const partes = [r != null ? `Valor obtido: ${un(fmtNum(r, 2), u)}` : '', t.pct != null ? `${fmtNum(t.pct, 0)}% do predito` : '',
+        const partes = [r != null ? `Valor obtido${id === 'preensao' && avMaos(v).usada ? ' (mão ' + avMaos(v).usada + ')' : ''}: ${un(fmtNum(r, 2), u)}` : '', t.pct != null ? `${fmtNum(t.pct, 0)}% do predito` : '',
           t.pred != null ? `Valor de referência (predito): ${un(n2(t.pred), u)}` : '', t.lin != null ? `Limite inferior: ${un(fmtNum(t.lin, 0), u)}` : '', t.cls ? `Classificação: ${t.cls}` : ''].filter(Boolean);
         if (partes.length) itens.push(paragrafo(partes.join('; ') + '.', { b: true }));
         if (t.aviso) itens.push(paragrafo('Atenção: ' + t.aviso + '.', { s: 7.4, it: true, cor: C.mut }));
         if (t.falta) itens.push(paragrafo('Predito não calculado: faltou ' + t.falta.join(', ') + '.', { s: 7.4, it: true, cor: C.mut }));
         if (!t.fonte && t.pred != null) itens.push(paragrafo('Valor de referência informado pela fisioterapeuta.', { s: 7.4, it: true, cor: C.mut }));
         itens.push(espaco(1.5));
-        if (r != null && t.pred > 0) itens.push(graficoColunas(tipo === 'extra' ? 'Resultado' : nm.split(' (')[0].length <= 14 ? nm : 'Resultado', r, t.pred));
+        const maos = id === 'preensao' ? avMaos(v) : null;
+        if (maos && maos.lista.length){
+          itens.push(paragrafo(maos.lista.map(([l, val]) => `Mão ${l}: ${fmtNum(val, 2)} ${u}`).join('; ') + (maos.dom ? `; mão dominante: ${maos.dom}` : '') + '.'));
+          if (t.pct != null && maos.lista.length > 1) itens.push(paragrafo(`O % do predito usa a mão ${maos.usada}.`, { s: 7.4, it: true, cor: C.mut }));
+        }
+        if (maos && maos.lista.length > 1 && t.pred > 0) itens.push(graficoColunas('', 0, 0, [...maos.lista.map(([l, val], i) => ['Mão ' + l, val, i ? [122, 91, 196] : [15, 143, 127]]), ['Referência', t.pred, C.ref]]));
+        else if (maos && maos.lista.length === 1 && t.pred > 0) itens.push(graficoColunas('Mão ' + maos.lista[0][0], r, t.pred));
+        else if (r != null && t.pred > 0) itens.push(graficoColunas(tipo === 'extra' ? 'Resultado' : nm.split(' (')[0].length <= 14 ? nm : 'Resultado', r, t.pred));
         else if (r != null && t.cls) itens.push(graficoFaixa(r, AV_CLS[id], u, t.cls));
       }
       if (v[`t_${id}_o`]) itens.push(obs(v[`t_${id}_o`]));

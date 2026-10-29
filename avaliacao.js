@@ -170,9 +170,24 @@ const avTx = (k, l, o = {}) => `<div class="fl full"><div class="lrow"><span>${e
 const avChk = (k, l, ops) => { const sel = Array.isArray(avv(k)) ? avv(k) : []; return `<fieldset class="full multi"><legend>${esc(l)}</legend>${ops.map(([v, t]) => `<label class="chk"><input type="checkbox" data-k="${k}" data-multi="1" value="${v}" ${sel.includes(v) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</fieldset>`; };
 const selo = '<span class="chip ok selo" hidden>Preenchido</span>';
 
+const AV_MAO = [['dir','Direita'],['esq','Esquerda'],['ambas','As duas']];
+// preensão palmar: mãos testadas e qual valor entra no % do predito (a dominante; sem dominante, a maior)
+function avMaos(v){
+  const m = v.t_preensao_mao, d = num(v.t_preensao_d), e = num(v.t_preensao_e), dom = v.t_preensao_dom;
+  const lista = []; if ((m === 'dir' || m === 'ambas') && d != null) lista.push(['direita', d]); if ((m === 'esq' || m === 'ambas') && e != null) lista.push(['esquerda', e]);
+  let usada = '', r = null;
+  if (lista.length === 1){ usada = lista[0][0]; r = lista[0][1]; }
+  else if (lista.length === 2){ const p = dom === 'dir' ? lista[0] : dom === 'esq' ? lista[1] : (d >= e ? lista[0] : lista[1]); usada = p[0]; r = p[1]; }
+  return { lista, usada, r, dom: dom ? (dom === 'dir' ? 'direita' : 'esquerda') : '' };
+}
 function avTeste([id, nome, un, pred, tipo]){
   let corpo;
-  if (tipo === 'txt') corpo = avTx(`t_${id}_r`, 'Resultado e achados', { rows: 3 });
+  if (id === 'preensao') corpo = avSel('t_preensao_mao', 'Mão testada', AV_MAO) + avSel('t_preensao_dom', 'Mão dominante', [['dir','Direita'],['esq','Esquerda']])
+    + avIn('t_preensao_d', `Mão direita (${un})`, { t: 'number' }).replace('<label class="', '<label data-mao="dir" class="')
+    + avIn('t_preensao_e', `Mão esquerda (${un})`, { t: 'number' }).replace('<label class="', '<label data-mao="esq" class="')
+    + avIn(`t_${id}_p`, `Predito (${un})`, { t: 'number' }) + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label><p class="ref full" id="mao_${id}"></p>`
+    + avIn(`t_${id}_o`, 'Observações', { full: 1 });
+  else if (tipo === 'txt') corpo = avTx(`t_${id}_r`, 'Resultado e achados', { rows: 3 });
   else corpo = (tipo === 'extra' ? avIn(`t_${id}_n`, 'Nome do teste') + avIn(`t_${id}_u`, 'Unidade') : '')
     + avIn(`t_${id}_r`, 'Resultado' + (un ? ` (${un})` : ''), { t: 'number' })
     + (AV_REF[id] ? `<label>Predito${un ? ` (${un})` : ''}<output id="pr_${id}" class="calc">—</output></label><label>% do predito<output id="pc_${id}" class="calc">—</output></label><p class="ref full" id="rf_${id}"></p>`
@@ -263,12 +278,17 @@ function avLer(){
   });
   Object.keys(v).forEach(k => { if (Array.isArray(v[k]) && !v[k].length) delete v[k]; });
   if (restrito()) v.fisio = minhaFisio;
+  // preensão palmar: o resultado usado no cálculo vem das mãos escolhidas
+  if (v.t_preensao_mao){ const M = avMaos(v); if (M.r != null) v.t_preensao_r = String(M.r); else delete v.t_preensao_r; }
+  else if (avAtual && avAtual.av && avAtual.av.t_preensao_r) v.t_preensao_r = avAtual.av.t_preensao_r;
   return v;
 }
 function avAtualizar(semRascunho){
   const f = $('#avForm'); if (!f) return; const v = avLer();
   const K = avCalc(v), set = (id, t) => { const o = document.getElementById(id); if (o) o.textContent = t; };
   set('avIdade', K.idade != null ? K.idade + ' anos' : '—');
+  { const mao = v.t_preensao_mao || ''; f.querySelectorAll('[data-mao]').forEach(l => { l.hidden = !(mao === 'ambas' || mao === l.dataset.mao); });
+    const M = avMaos(v); set('mao_preensao', !mao ? 'Escolha a mão testada.' : M.lista.length > 1 ? `O % do predito usa a mão ${M.usada}${M.dom ? ' (dominante)' : ' (maior valor; marque a dominante para usar ela)'}.` : ''); }
   set('avRcq', K.rcq != null ? fmtNum(K.rcq, 2) : '—');
   // IMC = massa (kg) ÷ altura (m)²
   set('avImc', K.imc ? fmtNum(K.imc.valor, 1) : '—'); set('avImcCls', K.imc ? K.imc.cls : '—');
