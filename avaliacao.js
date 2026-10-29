@@ -58,7 +58,7 @@ const AV_COMORB = [['neuro','Neurológica'],['resp','Respiratória'],['cardio','
 // [código, nome, unidade, tem valor predito?, 'txt' quando o resultado é descritivo]
 const AV_GRUPOS = [
   { g: 'mob', t: 'Mobilidade e queda', itens: [['tug','TUG','s',1],['vmarcha','Velocidade de marcha','m/s',1],['sppb','SPPB','pontos',0],['tls5','TLS5rep','s',1],['tls30','TLS30s','repetições',1],['fssicu','FSS-ICU','pontos',0],['ims','IMS','pontos',0]] },
-  { g: 'forca', t: 'Força', itens: [['rm1','1RM','kg',1],['preensao','Preensão palmar','kgf',1],['dina','Dinamometria','kgf',1],['dinaq','Dinamometria de quadríceps','kgf',1],['mrc','MRC','pontos',0]] },
+  { g: 'forca', t: 'Força', itens: [['rm1','1RM','kg',1],['preensao','Força de preensão palmar (FPP)','kgf',1],['dina','Dinamometria','kgf',1],['dinaq','Dinamometria de quadríceps','kgf',1],['mrc','MRC','pontos',0]] },
   { g: 'pulm', t: 'Função pulmonar', itens: [['cvf','CVF','L',1],['vef1','VEF1','L',1],['pfe','PFE','L/min',1],['pft','Pico de fluxo de tosse','L/min',1],['pimax','PiMax','cmH2O',1],['snip','SNIP','cmH2O',0],['pemax','PeMax','cmH2O',1],['sindex','S-Index','cmH2O',1],['endur','Endurance respiratório','',1]] },
   { g: 'cardio', t: 'Aptidão cardiorrespiratória', itens: [['tc6','TC6','m',1],['td6','TD6','',1],['iswt','ISWT','m',1],['chester','Chester Step','',1],['tls1','TLS 1 min','repetições',1],['tc2','TC2','',1],['risco','Estratificação de risco','',0,'txt']] },
   { g: 'vfc', t: 'VFC', itens: [['vfc','Variabilidade da frequência cardíaca','',0,'txt']] },

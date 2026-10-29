@@ -14,7 +14,7 @@ const AV_DESC = {
   tls5: 'O paciente levanta e senta de uma cadeira 5 vezes, o mais rápido possível. Avalia força de membros inferiores e funcionalidade. Quanto menor o tempo, melhor o desempenho.',
   tls30: 'Número de vezes que o paciente levanta e senta da cadeira em 30 segundos.',
   fssicu: 'Escala de estado funcional para pacientes internados, com 5 tarefas: rolar, passar de deitado para sentado, sentar na beira do leito, levantar da cadeira e caminhar.',
-  preensao: 'Força de preensão palmar medida com dinamômetro. Marcador de força muscular global, usado na triagem de sarcopenia.',
+  preensao: 'A FPP é um teste no qual o avaliado é orientado a realizar uma contração máxima de preensão palmar num dinamômetro. A FPP é um marcador global de força muscular e valores reduzidos estão associados a fraqueza muscular global e é utilizado para triagem de sarcopenia. (Chagas, 2018)',
   mrc: 'Soma da força de 6 grupos musculares de cada lado do corpo (0 a 5 em cada), de 0 a 60 pontos.',
   cvf: 'Capacidade vital forçada: volume máximo de ar expirado com esforço após uma inspiração máxima.',
   vef1: 'Volume de ar expirado no primeiro segundo da manobra de capacidade vital forçada.',
@@ -87,7 +87,7 @@ function gerarPdfAvaliacao(x){
       doc.setDrawColor(...C.grade); doc.setLineDashPattern([0.8, 0.8], 0);
       for (let i = 0; i <= 3; i++){ const gy = base - alto * i / 3; doc.line(x0 + 30, gy, x0 + IW - 30, gy); }
       doc.setLineDashPattern([], 0);
-      barras.forEach(([, val, cor], i) => { const bx = x1 + i * (bw + gap), ref = i === barras.length - 1;
+      barras.forEach(([, val, cor], i) => { const bx = x1 + i * (bw + gap), ref = barras[i][0] === 'Referência';
         const bh = Math.max(0.6, val / max * alto); doc.setFillColor(...cor); doc.rect(bx, base - bh, bw, bh, 'F');
         fonte(7.5, true, ref ? C.mut : C.tx); doc.text(fmtNum(val, val < 10 ? 2 : 0), bx + bw / 2, base - bh - 1.6, { align: 'center' });
       });
@@ -213,8 +213,8 @@ function gerarPdfAvaliacao(x){
           itens.push(paragrafo(maos.lista.map(([l, val]) => `Mão ${l}: ${fmtNum(val, 2)} ${u}`).join('; ') + (maos.dom ? `; mão dominante: ${maos.dom}` : '') + '.'));
           if (t.pct != null && maos.lista.length > 1) itens.push(paragrafo(`O % do predito usa a mão ${maos.usada}.`, { s: 7.4, it: true, cor: C.mut }));
         }
-        if (maos && maos.lista.length > 1 && t.pred > 0) itens.push(graficoColunas('', 0, 0, [...maos.lista.map(([l, val], i) => ['Mão ' + l, val, i ? [122, 91, 196] : [15, 143, 127]]), ['Referência', t.pred, C.ref]]));
-        else if (maos && maos.lista.length === 1 && t.pred > 0) itens.push(graficoColunas('Mão ' + maos.lista[0][0], r, t.pred));
+        // preensão: gráfico com as mãos testadas, com a referência quando houver predito
+        if (maos && maos.lista.length) itens.push(graficoColunas('', 0, 0, [...maos.lista.map(([l, val]) => ['Mão ' + l, val, l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]]), ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
         else if (r != null && t.pred > 0) itens.push(graficoColunas(tipo === 'extra' ? 'Resultado' : nm.split(' (')[0].length <= 14 ? nm : 'Resultado', r, t.pred));
         else if (r != null && t.cls) itens.push(graficoFaixa(r, AV_CLS[id], u, t.cls));
       }
