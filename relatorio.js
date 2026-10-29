@@ -209,7 +209,7 @@ function gerarPdfAvaliacao(x){
     if (v.objetivos) cartao('Objetivos terapêuticos', [paragrafo(v.objetivos)]);
     if (v.condutas) cartao('Condutas', [paragrafo(v.condutas)]);
   }
-  { if (y + 15 > 288) novaPagina(); y += 2; doc.setDrawColor(...C.borda); doc.setFillColor(255, 255, 255); doc.roundedRect(M, y, W, 13, 2.5, 2.5, 'FD');
+  { if (y + 15 > 290) novaPagina(); y += 2; doc.setDrawColor(...C.borda); doc.setFillColor(255, 255, 255); doc.roundedRect(M, y, W, 13, 2.5, 2.5, 'FD');
     fonte(8, false, C.mut); const pre = 'Profissional responsável: '; doc.text(pre, M + PAD + 2, y + 8); fonte(8, true, C.barra); doc.text(v.fisio || x.fisio || '', M + PAD + 2 + doc.getTextWidth(pre) + 0.5, y + 8); }
 
   // marca d'água e número da página
