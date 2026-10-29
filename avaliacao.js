@@ -69,7 +69,7 @@ const AV_GRUPOS = [
 const AV_ANAM = [['diag','Diagnósticos clínicos'],['queixa','Queixa principal'],['hda','HDA (história da doença atual)'],['hdp','HDP (história da doença pregressa)'],['antfam','Antecedentes familiares']];
 const AV_ANAM2 = [['farmacos','Fármacos em uso'],['equipe','Equipe assistencial'],['examefis','Exame físico']];
 const AV_VITAIS = [['fc','FC','bpm'],['fr','FR','irpm'],['pa','PA','mmHg','text'],['spo2','SpO2','%'],['temp','Temperatura','°C']];
-const AV_OBRIG = [['pnome','Paciente'],['quando','Data e hora'],['fisio','Fisioterapeuta'],['situacao','Situação'],['ficha','Ficha'],['altura','Altura'],['massa','Massa']];
+const AV_OBRIG = [['pnome','Paciente'],['quando','Data e hora'],['fisio','Fisioterapeuta'],['situacao','Situação'],['sexo','Sexo'],['ficha','Ficha'],['altura','Altura'],['massa','Massa']];
 
 // a Camila não carrega a lista de pacientes; para ela, a busca usa os pacientes da agenda dela
 function avPacientes(){
@@ -82,6 +82,62 @@ let avT = null, avLista = null, avAtual = null, avTodos = false, avCarregando = 
 const num = s => { const n = Number(String(s ?? '').replace(',', '.')); return s === '' || s == null || !isFinite(n) ? null : n; };
 const fmtNum = (n, c = 1) => n == null ? '' : n.toLocaleString('pt-BR', { maximumFractionDigits: c });
 const rotulo = (L, k) => (L.find(x => x[0] === k) || [k, k])[1];
+
+// ----- cálculos automáticos -----
+// Só entram equações e pontos de corte com fonte conhecida. A fonte aparece na tela e no PDF.
+// Quando a idade está fora da faixa estudada, o valor sai com aviso de extrapolação.
+const AV_SEXO = [['F','Feminino'],['M','Masculino']];
+function avIdade(v){
+  if (!v.nasc) return null; const ref = (v.quando || today()).slice(0, 10);
+  const [a, m, d] = v.nasc.split('-').map(Number), [A, M, D] = ref.split('-').map(Number);
+  let i = A - a; if (M < m || (M === m && D < d)) i--; return i >= 0 && i < 130 ? i : null;
+}
+const avCtx = v => ({ sexo: v.sexo || '', idade: avIdade(v), alt: num(v.altura), peso: num(v.massa) });
+const AV_PRECISA = { sexo: 'sexo', idade: 'data de nascimento', alt: 'altura', peso: 'massa' };
+// equações de valor predito
+const AV_REF = {
+  pimax: { fonte: 'Neder et al., 1999', faixa: [20, 80], usa: ['sexo', 'idade'], pred: c => c.sexo === 'F' ? 110.4 - 0.49 * c.idade : 155.3 - 0.80 * c.idade },
+  pemax: { fonte: 'Neder et al., 1999', faixa: [20, 80], usa: ['sexo', 'idade'], pred: c => c.sexo === 'F' ? 115.6 - 0.61 * c.idade : 165.3 - 0.81 * c.idade },
+  tc6: { fonte: 'Enright & Sherrill, 1998', faixa: [40, 80], usa: ['sexo', 'idade', 'alt', 'peso'],
+    pred: c => c.sexo === 'F' ? 2.11 * c.alt - 2.29 * c.peso - 5.78 * c.idade + 667 : 7.57 * c.alt - 5.02 * c.idade - 1.76 * c.peso - 309,
+    lin: (c, p) => p - (c.sexo === 'F' ? 139 : 153) },
+  tls5: { fonte: 'Bohannon, 2006 (média da faixa etária)', faixa: [60, 89], usa: ['idade'], menorMelhor: 1, pred: c => c.idade < 70 ? 11.4 : c.idade < 80 ? 12.6 : 14.8 }
+};
+// pontos de corte: [a partir de, rótulo, 'gt' = só acima do valor]
+const AV_CLS = {
+  sppb: { fonte: 'Guralnik et al., 1994', min: 0, max: 12, cortes: [[0, 'Muito baixo'], [4, 'Baixo'], [7, 'Moderado'], [10, 'Bom']] },
+  mrc: { fonte: 'De Jonghe et al., 2002; Hermans et al., 2012', min: 0, max: 60, cortes: [[0, 'Fraqueza grave'], [36, 'Fraqueza'], [48, 'Sem fraqueza']] },
+  pft: { fonte: 'Bach, 1996', min: 0, max: 600, cortes: [[0, 'Tosse ineficaz'], [160, 'Risco nas infecções'], [270, 'Adequada']] },
+  cat: { fonte: 'Jones et al., 2009', min: 0, max: 40, cortes: [[0, 'Impacto baixo'], [10, 'Médio'], [21, 'Alto'], [31, 'Muito alto']] },
+  act: { fonte: 'Nathan et al., 2004', min: 5, max: 25, cortes: [[5, 'Não controlada'], [20, 'Controlada']] }
+};
+function imcRef(idade){
+  return idade != null && idade >= 60
+    ? { fonte: 'Lipschitz, 1994 (60 anos ou mais)', min: 14, max: 40, cortes: [[0, 'Baixo peso'], [22, 'Eutrofia'], [27, 'Sobrepeso', 'gt']] }
+    : { fonte: 'OMS (adultos)', min: 14, max: 40, cortes: [[0, 'Baixo peso'], [18.5, 'Eutrofia'], [25, 'Sobrepeso'], [30, 'Obesidade']] };
+}
+function classifica(val, def){ let r = null; def.cortes.forEach(([c, l, gt]) => { if (gt ? val > c : val >= c) r = l; }); return r; }
+// calcula tudo a partir do que foi digitado
+function avCalc(v){
+  const c = avCtx(v), out = { idade: c.idade, testes: {} };
+  if (c.alt && c.peso){ const imc = c.peso / Math.pow(c.alt / 100, 2), ref = imcRef(c.idade);
+    out.imc = { valor: imc, cls: classifica(imc, ref), fonte: ref.fonte, def: ref, aviso: c.idade == null ? 'sem data de nascimento: usada a tabela de adultos' : '' }; }
+  AV_GRUPOS.forEach(G => G.itens.forEach(([id, , , temPred, tipo]) => {
+    if (tipo === 'txt') return;
+    const r = num(v[`t_${id}_r`]), R = AV_REF[id], C = AV_CLS[id], t = {};
+    if (R){
+      const falta = R.usa.filter(k => c[k] == null || c[k] === '');
+      if (falta.length) t.falta = falta.map(k => AV_PRECISA[k]);
+      else { t.pred = R.pred(c); t.fonte = R.fonte; if (R.lin) t.lin = R.lin(c, t.pred);
+        if (c.idade < R.faixa[0] || c.idade > R.faixa[1]) t.aviso = `idade fora da faixa estudada (${R.faixa[0]} a ${R.faixa[1]} anos): valor extrapolado`; }
+      t.menorMelhor = !!R.menorMelhor;
+    } else if (temPred){ const p = num(v[`t_${id}_p`]); if (p) t.pred = p; }
+    if (r != null && t.pred > 0){ t.pct = r / t.pred * 100; if (t.lin != null) t.abaixoLin = r < t.lin; }
+    if (C && r != null){ t.cls = classifica(r, C); t.fonteCls = C.fonte; }
+    if (Object.keys(t).length) out.testes[id] = t;
+  }));
+  return out;
+}
 
 async function carregarAvaliacoes(){
   if (avCarregando) return; avCarregando = true;
@@ -113,7 +169,9 @@ function avTeste([id, nome, un, pred, tipo]){
   if (tipo === 'txt') corpo = avTx(`t_${id}_r`, 'Resultado e achados', { rows: 3 });
   else corpo = (tipo === 'extra' ? avIn(`t_${id}_n`, 'Nome do teste') + avIn(`t_${id}_u`, 'Unidade') : '')
     + avIn(`t_${id}_r`, 'Resultado' + (un ? ` (${un})` : ''), { t: 'number' })
-    + (pred ? avIn(`t_${id}_p`, 'Predito' + (un ? ` (${un})` : ''), { t: 'number' }) + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label>` : '')
+    + (AV_REF[id] ? `<label>Predito${un ? ` (${un})` : ''}<output id="pr_${id}" class="calc">—</output></label><label>% do predito<output id="pc_${id}" class="calc">—</output></label><p class="ref full" id="rf_${id}"></p>`
+      : pred ? avIn(`t_${id}_p`, 'Predito' + (un ? ` (${un})` : ''), { t: 'number' }) + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label>` : '')
+    + (AV_CLS[id] ? `<label class="full">Classificação<output id="cl_${id}" class="calc">—</output></label><p class="ref full">${esc(AV_CLS[id].fonte)}</p>` : '')
     + avIn(`t_${id}_o`, 'Observações', { full: 1 });
   return `<details class="tst" data-t="${id}"><summary><span class="nm">${esc(nome)}</span>${selo}</summary><div class="form">${corpo}</div></details>`;
 }
@@ -125,6 +183,7 @@ function avForm(id, base){
   avAtual = id ? JSON.parse(JSON.stringify(avLista.find(x => x._id === id) || {})) : Object.assign({ status: 'rascunho', av: {} }, base || {});
   if (!avAtual.av) avAtual.av = {};
   if (!id && !avAtual.av.quando) avAtual.av.quando = today() + 'T' + new Date().toTimeString().slice(0, 5);
+  avNascCadastro(avAtual.av);
   if (!avAtual.av.fisio) avAtual.av.fisio = avAtual.fisio || (restrito() ? minhaFisio : '');
   // rascunho que ficou só neste celular (o app fechou antes de salvar)
   let recuperado = false;
@@ -142,6 +201,8 @@ function avForm(id, base){
       + avIn('quando', 'Data e hora', { req: 1, t: 'datetime-local' })
       + (restrito() ? avIn('fisio', 'Fisioterapeuta', { dis: 1 }) : avSel('fisio', 'Fisioterapeuta', fisios().map(f => [f, f]), { req: 1 }))
       + avSel('situacao', 'Situação', AV_SITUACAO, { req: 1 })
+      + avSel('sexo', 'Sexo', AV_SEXO, { req: 1 })
+      + avIn('nasc', 'Data de nascimento', { t: 'date' }) + '<label>Idade<output id="avIdade" class="calc">—</output></label>'
       + avSel('ficha', 'Ficha (define os testes)', Object.entries(AV_FICHAS).map(([k, f]) => [k, f.nome]), { req: 1, full: 1 }))}
     ${avSecao(2, 'Anamnese',
       AV_ANAM.map(([k, l]) => avTx(k, l)).join('')
@@ -153,7 +214,7 @@ function avForm(id, base){
       AV_VITAIS.map(([k, l, un, t]) => avIn(k, `${l} (${un})`, { t: t || 'number' })).join('')
       + avTx('ausculta', 'Ausculta pulmonar', { rows: 2 }) + avTx('pmv', 'Padrão muscular ventilatório', { rows: 2 })
       + avIn('altura', 'Altura (cm)', { req: 1, t: 'number' }) + avIn('massa', 'Massa (kg)', { req: 1, t: 'number' })
-      + '<label>IMC (calculado)<output id="avImc" class="calc">—</output></label>'
+      + '<label>IMC (calculado)<output id="avImc" class="calc">—</output></label><label>Classificação do IMC<output id="avImcCls" class="calc">—</output></label><p class="ref full" id="avImcRef"></p>'
       + avIn('pescoco', 'Circunferência do pescoço (cm)', { t: 'number' })
       + avIn('fonte', 'Fonte dos dados', { full: 1, ph: 'Ex.: medido na avaliação, informado pela família' }))}
     <details class="avsec" data-s="4" open><summary><span class="nm">4. Testes</span><span class="chip mute" id="avCnt"></span></summary>
@@ -173,6 +234,12 @@ function avForm(id, base){
   if (!d.open) d.showModal();
   avTodos = false; avAtualizar(true);
 }
+document.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.k === 'pnome' && e.target.closest('#avForm')){ const v = { pnome: e.target.value }; if (avNascCadastro(v)){ const n = $('#avForm [data-k="nasc"]'); if (n && !n.value){ n.value = v.nasc; avAtualizar(); } } } });
+function avNascCadastro(v){
+  if (v.nasc || !v.pnome || !isAdmin) return false;
+  const p = avPacientes().find(x => x.nome.trim().toLowerCase() === v.pnome.trim().toLowerCase());
+  const n = p && S.planos[p.pid]?.nasc; if (n){ v.nasc = n; return true; } return false;
+}
 function avLer(){
   const v = {}; const f = $('#avForm'); if (!f) return v;
   f.querySelectorAll('[data-k]').forEach(el => {
@@ -186,20 +253,25 @@ function avLer(){
 }
 function avAtualizar(semRascunho){
   const f = $('#avForm'); if (!f) return; const v = avLer();
-  // IMC = massa (kg) / altura (m)²
-  const alt = num(v.altura), mas = num(v.massa);
-  const imc = alt && mas ? mas / Math.pow(alt / 100, 2) : null;
-  const oi = $('#avImc'); if (oi) oi.textContent = imc ? fmtNum(imc, 1) : '—';
-  // % do predito = resultado ÷ predito × 100
-  AV_GRUPOS.forEach(G => G.itens.forEach(([id]) => { const o = document.getElementById('pc_' + id); if (!o) return;
-    const r = num(v[`t_${id}_r`]), p = num(v[`t_${id}_p`]); o.textContent = r != null && p ? fmtNum(r / p * 100, 0) + '%' : '—'; }));
+  const K = avCalc(v), set = (id, t) => { const o = document.getElementById(id); if (o) o.textContent = t; };
+  set('avIdade', K.idade != null ? K.idade + ' anos' : '—');
+  // IMC = massa (kg) ÷ altura (m)²
+  set('avImc', K.imc ? fmtNum(K.imc.valor, 1) : '—'); set('avImcCls', K.imc ? K.imc.cls : '—');
+  set('avImcRef', K.imc ? K.imc.fonte + (K.imc.aviso ? ' · ' + K.imc.aviso : '') : '');
+  // predito pela equação da referência; % do predito = resultado ÷ predito × 100
+  AV_GRUPOS.forEach(G => G.itens.forEach(([id, , un]) => { const t = K.testes[id] || {};
+    set('pr_' + id, t.pred != null ? fmtNum(t.pred, 2) : '—');
+    set('pc_' + id, t.pct != null ? fmtNum(t.pct, 0) + '%' : '—');
+    set('cl_' + id, t.cls || '—');
+    if (AV_REF[id]) set('rf_' + id, t.falta ? 'Para calcular o predito, preencha: ' + t.falta.join(', ') + '.'
+      : [AV_REF[id].fonte, t.lin != null ? `limite inferior ${fmtNum(t.lin, 0)} ${un}` : '', AV_REF[id].menorMelhor ? 'tempo: quanto menor, melhor' : '', t.aviso || ''].filter(Boolean).join(' · ')); }));
   // selos "Preenchido"
   const tem = el => [...el.querySelectorAll('[data-k]')].some(i => i.dataset.multi ? i.checked : (i.value || '').trim() !== '');
   let nTestes = 0;
   f.querySelectorAll('details.tst').forEach(t => { const ok = tem(t); t.querySelector('.selo').hidden = !ok; if (ok) nTestes++; });
   f.querySelectorAll('details.grp').forEach(g => { const n = [...g.querySelectorAll('details.tst')].filter(t => !t.querySelector('.selo').hidden).length; const c = g.querySelector('.cnt'); c.hidden = !n; c.textContent = n + (n > 1 ? ' preenchidos' : ' preenchido'); });
   f.querySelectorAll('details.avsec[data-s]').forEach(s => { const sl = s.querySelector(':scope > summary .selo'); if (!sl) return;
-    const n = s.dataset.s; const ok = n === '1' ? ['pnome','quando','fisio','situacao','ficha'].every(k => v[k]) : n === '3' ? !!(v.altura && v.massa) : n === '5' ? !!(v.diagfisio && v.objetivos) : tem(s);
+    const n = s.dataset.s; const ok = n === '1' ? ['pnome','quando','fisio','situacao','sexo','ficha'].every(k => v[k]) : n === '3' ? !!(v.altura && v.massa) : n === '5' ? !!(v.diagfisio && v.objetivos) : tem(s);
     sl.hidden = !ok; });
   const cnt = $('#avCnt'); if (cnt) cnt.textContent = nTestes ? nTestes + (nTestes > 1 ? ' testes preenchidos' : ' teste preenchido') : 'nenhum teste preenchido';
   // a ficha define quais grupos de testes aparecem
@@ -219,9 +291,9 @@ async function avSalvar(finalizar){
   if (!v.pnome){ msg.hidden = false; msg.textContent = 'Escreva o nome do paciente antes de salvar.'; return; }
   const p0 = avPacientes().find(x => x.nome.trim().toLowerCase() === v.pnome.toLowerCase()); const p = p0 ? { _id: p0.pid, nome: p0.nome } : null;
   const id = avAtual._id || ('av_' + novoId()); const agora = new Date().toISOString();
-  const alt = num(v.altura), mas = num(v.massa); if (alt && mas) v.imc = fmtNum(mas / Math.pow(alt / 100, 2), 1); else delete v.imc;
+  const K = avCalc(v); if (K.imc) v.imc = fmtNum(K.imc.valor, 1); else delete v.imc;
   const doc = { tipo: 'avaliacao', pid: p?._id || '', pnome: p?.nome || v.pnome, data: (v.quando || today()).slice(0, 10), fisio: v.fisio || '',
-    status: finalizar ? 'finalizada' : (avAtual.status || 'rascunho'), agId: avAtual.agId || '', av: v,
+    status: finalizar ? 'finalizada' : (avAtual.status || 'rascunho'), agId: avAtual.agId || '', av: v, calc: K,
     criadoEm: avAtual.criadoEm || agora, alteradoEm: avAtual._id ? agora : '', finalizadaEm: finalizar ? agora : (avAtual.finalizadaEm || '') };
   try {
     await db.doc('evolucoes/' + id).set(doc); clearTimeout(avT);
@@ -250,13 +322,53 @@ function gerarPdfAvaliacao(x){
   const titulo = t => { quebra(16); y += 3; escreve(t, { size: 12, bold: true, after: 0.5 }); doc.setDrawColor(79, 125, 135); doc.setLineWidth(0.4); doc.line(M, y, M + W, y); y += 4; };
   const campo = (rot, val) => { if (val == null || val === '' || (Array.isArray(val) && !val.length)) return; escreve(rot, { size: 9, bold: true, after: 0.3, cor: 80 }); escreve(val, { after: 2.2 }); };
   const linhaKV = pares => { const t = pares.filter(([, val]) => val !== '' && val != null).map(([r, val]) => `${r}: ${val}`).join('   ·   '); if (t) escreve(t, { after: 2.2 }); };
+  const K = x.calc && x.calc.testes ? x.calc : avCalc(v);
+  // ----- gráficos desenhados no próprio PDF -----
+  const AC = [79, 125, 135], TXT = [29, 42, 45], MUT = [95, 113, 117], GRADE = [222, 228, 229], REF = [140, 150, 152];
+  const ZONAS = [[238, 244, 245], [216, 230, 233], [190, 213, 218], [160, 193, 200]];
+  const labW = 52, x0 = M + labW, pw = W - labW - 14;
+  const nomeCurto = t => doc.splitTextToSize(t, labW - 3)[0];
+  function grafPred(itens){
+    const rowH = 8, n = itens.length, maxV = Math.min(200, Math.max(120, Math.ceil(Math.max(...itens.map(i => i.pct)) / 20) * 20));
+    const X = p => x0 + Math.max(0, Math.min(p, maxV)) / maxV * pw, passo = maxV > 150 ? 50 : 20;
+    quebra(rowH * n + 18); const y0 = y + 2;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...MUT); doc.setLineWidth(0.15); doc.setDrawColor(...GRADE);
+    for (let t = 0; t <= maxV; t += passo){ doc.line(X(t), y0, X(t), y0 + rowH * n); doc.text(t + '%', X(t), y0 + rowH * n + 3.6, { align: 'center' }); }
+    doc.setDrawColor(...REF); doc.setLineWidth(0.4); doc.setLineDashPattern([1.2, 1], 0); doc.line(X(100), y0 - 1.5, X(100), y0 + rowH * n); doc.setLineDashPattern([], 0);
+    itens.forEach((it, i) => {
+      const yy = y0 + i * rowH; doc.setFontSize(8.5); doc.setTextColor(...TXT); doc.text(nomeCurto(it.nome + (it.menor ? ' *' : '')), M, yy + 5.2);
+      const w = Math.max(0.6, X(it.pct) - x0); doc.setFillColor(...AC); doc.roundedRect(x0, yy + 2.3, w, 4, Math.min(0.8, w / 2), Math.min(0.8, w / 2), 'F');
+      if (it.linPct != null){ doc.setDrawColor(...TXT); doc.setLineWidth(0.6); doc.line(X(it.linPct), yy + 1.3, X(it.linPct), yy + 7.3); }
+      doc.setFontSize(8); doc.setTextColor(...TXT); doc.text(fmtNum(it.pct, 0) + '%' + (it.pct > maxV ? ' (fora da escala)' : ''), X(it.pct) + 1.5, yy + 5.5);
+    });
+    y = y0 + rowH * n + 7.5;
+    const leg = ['Linha tracejada: 100% do predito.'];
+    if (itens.some(i => i.linPct != null)) leg.push('Traço escuro: limite inferior da normalidade.');
+    if (itens.some(i => i.menor)) leg.push('* Teste de tempo: acima de 100% significa mais lento que o esperado.');
+    escreve(leg.join(' '), { size: 7.5, cor: 95, after: 3 });
+  }
+  function grafEscala(nome, val, def, un, cls){
+    quebra(17); const y0 = y, h = 5, X = t => x0 + (Math.max(def.min, Math.min(def.max, t)) - def.min) / (def.max - def.min) * pw;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...TXT); doc.text(nomeCurto(nome), M, y0 + 4.5);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...MUT); doc.text(nomeCurto(`${fmtNum(val, 1)}${un ? ' ' + un : ''} · ${cls}`), M, y0 + 8.5);
+    def.cortes.forEach(([c, l], i) => {
+      const a = X(Math.max(c, def.min)), b = i + 1 < def.cortes.length ? X(def.cortes[i + 1][0]) : X(def.max);
+      doc.setFillColor(...ZONAS[Math.min(i, 3)]); doc.rect(a + (i ? 0.3 : 0), y0 + 2, Math.max(0.2, b - a - (i ? 0.3 : 0)), h, 'F');
+      doc.setFontSize(6.5); doc.setTextColor(...MUT); if (doc.getTextWidth(l) < b - a - 1) doc.text(l, (a + b) / 2, y0 + 5.4, { align: 'center' });
+      if (i) doc.text(fmtNum(c, 1), a, y0 + 10, { align: 'center' });
+    });
+    const mx = X(val); doc.setFillColor(...TXT); doc.triangle(mx - 1.6, y0 + 0.2, mx + 1.6, y0 + 0.2, mx, y0 + 2.4, 'F');
+    doc.setDrawColor(...TXT); doc.setLineWidth(0.5); doc.line(mx, y0 + 2, mx, y0 + 2 + h);
+    doc.setTextColor(0); y = y0 + 13;
+  }
+
   const quando = v.quando ? fmtD(v.quando.slice(0, 10)) + (v.quando.length > 10 ? ' às ' + v.quando.slice(11, 16) : '') : fmtD(x.data);
 
   escreve('Avaliação fisioterapêutica', { size: 16, bold: true, after: 1, align: 'center' });
   escreve('AP Fisioterapia Domiciliar', { size: 10, after: 6, align: 'center', cor: 90 });
   titulo('1. Dados principais');
   campo('Paciente', x.pnome); linhaKV([['Data', quando], ['Fisioterapeuta', v.fisio || x.fisio]]);
-  linhaKV([['Situação', v.situacao ? rotulo(AV_SITUACAO, v.situacao) : ''], ['Ficha', AV_FICHAS[v.ficha]?.nome || '']]);
+  linhaKV([['Sexo', v.sexo ? rotulo(AV_SEXO, v.sexo) : ''], ['Idade', K.idade != null ? K.idade + ' anos' : ''], ['Situação', v.situacao ? rotulo(AV_SITUACAO, v.situacao) : ''], ['Ficha', AV_FICHAS[v.ficha]?.nome || '']]);
 
   const anam = [...AV_ANAM, ['comorb', 'Comorbidades'], ...AV_ANAM2];
   if (anam.some(([k]) => v[k]) || v.evolucao || v.respiracao || v.protese){
@@ -268,6 +380,7 @@ function gerarPdfAvaliacao(x){
   titulo('3. Dados vitais e composição corporal');
   linhaKV(AV_VITAIS.map(([k, l, un]) => [l, v[k] ? `${v[k]} ${un}` : '']));
   linhaKV([['Altura', v.altura ? v.altura + ' cm' : ''], ['Massa', v.massa ? v.massa + ' kg' : ''], ['IMC', v.imc ? v.imc + ' kg/m²' : ''], ['Pescoço', v.pescoco ? v.pescoco + ' cm' : '']]);
+  if (K.imc){ escreve(`Classificação do IMC: ${K.imc.cls} (${K.imc.fonte}${K.imc.aviso ? '; ' + K.imc.aviso : ''})`, { size: 9, after: 1.5 }); grafEscala('IMC', K.imc.valor, K.imc.def, 'kg/m²', K.imc.cls); }
   campo('Ausculta pulmonar', v.ausculta); campo('Padrão muscular ventilatório', v.pmv); campo('Fonte dos dados', v.fonte);
 
   const grupos = AV_GRUPOS.map(G => ({ t: G.t, L: G.itens.filter(([id]) => ['r', 'p', 'o', 'n'].some(s => v[`t_${id}_${s}`])) })).filter(G => G.L.length);
@@ -279,13 +392,28 @@ function gerarPdfAvaliacao(x){
         const u = tipo === 'extra' ? (v[`t_${id}_u`] || '') : un;
         const nm = tipo === 'extra' ? (v[`t_${id}_n`] || nome) : nome;
         if (tipo === 'txt'){ campo(nm, v[`t_${id}_r`]); return; }
-        const r = num(v[`t_${id}_r`]), p = num(v[`t_${id}_p`]);
-        const partes = [r != null ? `resultado ${v[`t_${id}_r`]}${u ? ' ' + u : ''}` : '', pred && p != null ? `predito ${v[`t_${id}_p`]}${u ? ' ' + u : ''}` : '', r != null && p ? `${fmtNum(r / p * 100, 0)}% do predito` : ''].filter(Boolean);
-        escreve(`${nm}: ${partes.join(' · ') || '—'}`, { indent: 3, after: v[`t_${id}_o`] ? 0.3 : 1.6 });
+        const r = num(v[`t_${id}_r`]), t = K.testes[id] || {};
+        const partes = [r != null ? `resultado ${v[`t_${id}_r`]}${u ? ' ' + u : ''}` : '', t.pred != null ? `predito ${fmtNum(t.pred, 2)}${u ? ' ' + u : ''}` : '',
+          t.pct != null ? `${fmtNum(t.pct, 0)}% do predito` : '', t.lin != null ? `limite inferior ${fmtNum(t.lin, 0)}${u ? ' ' + u : ''}${t.abaixoLin ? ' (abaixo do limite)' : ''}` : '', t.cls ? `classificação: ${t.cls}` : ''].filter(Boolean);
+        escreve(`${nm}: ${partes.join(' · ') || '—'}`, { indent: 3, after: 0.3 });
+        const fontes = [t.fonte, t.fonteCls].filter(Boolean).join('; ');
+        const nota = [fontes ? 'Referência: ' + fontes : (t.pred != null ? 'Predito informado pela fisioterapeuta' : ''), t.aviso ? 'Atenção: ' + t.aviso : ''].filter(Boolean).join(' · ');
+        if (nota) escreve(nota, { indent: 3, size: 8, after: 0.3, cor: 95 });
+        y += v[`t_${id}_o`] ? 0 : 1.3;
         if (v[`t_${id}_o`]) escreve('Obs.: ' + v[`t_${id}_o`], { indent: 3, size: 9, after: 1.8, cor: 70 });
       });
       y += 1;
     });
+  }
+  const barras = [], escalas = [];
+  AV_GRUPOS.forEach(G => G.itens.forEach(([id, nome, un, , tipo]) => { const t = K.testes[id]; if (!t) return;
+    const nm = tipo === 'extra' ? (v[`t_${id}_n`] || nome) : nome;
+    if (t.pct != null) barras.push({ nome: nm, pct: t.pct, linPct: t.lin != null && t.pred ? t.lin / t.pred * 100 : null, menor: t.menorMelhor });
+    if (t.cls) escalas.push([nm, num(v[`t_${id}_r`]), AV_CLS[id], un, t.cls]); }));
+  if (barras.length || escalas.length){
+    quebra(barras.length ? 8 * barras.length + 40 : 40); titulo('Gráficos');
+    if (barras.length){ quebra(8 * barras.length + 26); escreve('Resultado em % do predito', { size: 10, bold: true, after: 1 }); grafPred(barras); }
+    if (escalas.length){ quebra(26); escreve('Escalas e pontos de corte', { size: 10, bold: true, after: 2 }); escalas.forEach(e => grafEscala(...e)); y += 2; }
   }
   titulo('5. Conclusão');
   campo('Diagnóstico fisioterapêutico', v.diagfisio); campo('Objetivos terapêuticos', v.objetivos); campo('Condutas', v.condutas);
