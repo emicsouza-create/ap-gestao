@@ -304,3 +304,4 @@ output.calc{display:flex;align-items:center;min-height:40px;padding:0 10px;borde
 .dlg.av .pill input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
 .dlg.av #avTestes .grp{padding:4px 14px 6px}
 .dlg.av #avTestes details.tst{margin:0 0 8px}
+.dlg.av .eqpm{margin:0 0 10px}

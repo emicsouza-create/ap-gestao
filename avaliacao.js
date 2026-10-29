@@ -94,8 +94,8 @@ function avIdade(v){
   const [a, m, d] = v.nasc.split('-').map(Number), [A, M, D] = ref.split('-').map(Number);
   let i = A - a; if (M < m || (M === m && D < d)) i--; return i >= 0 && i < 130 ? i : null;
 }
-const avCtx = v => ({ sexo: v.sexo || '', idade: avIdade(v), alt: num(v.altura), peso: num(v.massa) });
-const AV_PRECISA = { sexo: 'sexo', idade: 'data de nascimento', alt: 'altura', peso: 'massa' };
+const avCtx = v => ({ sexo: v.sexo || '', idade: avIdade(v), alt: num(v.altura), peso: num(v.massa), cint: num(v.cintura) });
+const AV_PRECISA = { sexo: 'sexo', idade: 'data de nascimento', alt: 'altura', peso: 'massa', cint: 'circunferência da cintura (bloco 3)' };
 // equações de valor predito
 const AV_REF = {
   // Neder et al., 1999 (Braz J Med Biol Res 32:719-27), 100 adultos de 20 a 80 anos. Equações e erro-padrão (EPE) da figura 1.
@@ -110,6 +110,16 @@ const AV_REF = {
     lin: (c, p) => p - (c.sexo === 'F' ? 139 : 153) },
   tls5: { fonte: 'Bohannon, 2006 (média da faixa etária)', faixa: [60, 89], usa: ['idade'], menorMelhor: 1, pred: c => c.idade < 70 ? 11.4 : c.idade < 80 ? 12.6 : 14.8 }
 };
+// Equações alternativas de PiMax e PeMax: Pessoa et al., 2014 (Braz J Phys Ther 18(5):410-8), 134 adultos de 20 a 89 anos (Belo Horizonte).
+// Sexo: 1 homem, 0 mulher. Limite inferior = média − 1,645 × EPE (indicado pelos próprios autores).
+const AV_REF_PESSOA = {
+  pimax: { fonte: 'Pessoa et al., 2014', faixa: [20, 89], usa: ['sexo', 'idade', 'peso'], abs: 1, pred: c => 63.27 - 0.55 * c.idade + 17.96 * (c.sexo === 'M' ? 1 : 0) + 0.58 * c.peso,
+    lin: (c, p) => p - 1.645 * 26.3, linNota: 'predito − 1,645 × erro-padrão (26,3 cmH2O), como indicam os autores' },
+  pemax: { fonte: 'Pessoa et al., 2014', faixa: [20, 89], usa: ['sexo', 'idade', 'cint'], abs: 1, pred: c => -61.41 + 2.29 * c.idade - 0.03 * c.idade * c.idade + 33.72 * (c.sexo === 'M' ? 1 : 0) + 1.40 * c.cint,
+    lin: (c, p) => p - 1.645 * 32.8, linNota: 'predito − 1,645 × erro-padrão (32,8 cmH2O), como indicam os autores' }
+};
+const AV_EQ_PM = [['neder', 'Neder et al., 1999 (idade e sexo)'], ['pessoa', 'Pessoa et al., 2014 (idade, sexo, peso e cintura)']];
+const refDe = (id, v) => ((v || {}).eq_pm === 'pessoa' && AV_REF_PESSOA[id]) || AV_REF[id];
 // pontos de corte: [a partir de, rótulo, 'gt' = só acima do valor]
 const AV_CLS = {
   sppb: { fonte: 'Guralnik et al., 1994', min: 0, max: 12, cortes: [[0, 'Muito baixo'], [4, 'Baixo'], [7, 'Moderado'], [10, 'Bom']] },
@@ -157,11 +167,11 @@ function avCalc(v){
   const ci = num(v.cintura), qu = num(v.quadril); if (ci && qu) out.rcq = ci / qu;
   AV_GRUPOS.forEach(G => G.itens.forEach(([id, , , temPred, tipo]) => {
     if (tipo === 'txt') return;
-    const R = AV_REF[id], C = AV_CLS[id], t = {}; let r = num(v[`t_${id}_r`]); if (R && R.abs && r != null) r = Math.abs(r);
+    const R = refDe(id, v), C = AV_CLS[id], t = {}; let r = num(v[`t_${id}_r`]); if (R && R.abs && r != null) r = Math.abs(r);
     if (R){
       const falta = R.usa.filter(k => c[k] == null || c[k] === '');
       if (falta.length) t.falta = falta.map(k => AV_PRECISA[k]);
-      else { t.pred = R.pred(c); t.fonte = R.fonte; if (R.lin) t.lin = R.lin(c, t.pred);
+      else { t.pred = R.pred(c); t.fonte = R.fonte; if (R.lin){ const l = R.lin(c, t.pred); if (l > 0) t.lin = l; }
         if (c.idade < R.faixa[0] || c.idade > R.faixa[1]) t.aviso = `idade fora da faixa estudada (${R.faixa[0]} a ${R.faixa[1]} anos): valor extrapolado`; }
       t.menorMelhor = !!R.menorMelhor;
     } else if (id === 'preensao' && avMaos(v).lista.length){ Object.assign(t, avPreensao(v, c)); if (t.pred == null){ const p = num(v[`t_${id}_p`]); if (p){ t.pred = p; t.manual = true; } } }
@@ -235,6 +245,7 @@ function avForm(id, base){
   if (!avAtual.av) avAtual.av = {};
   if (!id && !avAtual.av.quando) avAtual.av.quando = today() + 'T' + new Date().toTimeString().slice(0, 5);
   avNascCadastro(avAtual.av);
+  if (!avAtual.av.eq_pm) avAtual.av.eq_pm = 'neder';
   if (!avAtual.av.fisio) avAtual.av.fisio = avAtual.fisio || (restrito() ? minhaFisio : '');
   // rascunho que ficou só neste celular (o app fechou antes de salvar)
   let recuperado = false;
@@ -273,7 +284,7 @@ function avForm(id, base){
     <details class="avsec" data-s="4" open><summary><span class="nm">4. Testes</span><span class="chip mute" id="avCnt"></span></summary>
       <p class="sub" style="margin:8px 14px">Marque os testes que você vai fazer. Só os marcados abrem para preencher e entram no relatório.</p>
       <div class="tsel">${AV_GRUPOS.map(G => `<div class="tgrp"><div class="tgt">${esc(G.t)}</div><div class="pills">${G.itens.map(([id, nome]) => `<label class="pill"><input type="checkbox" data-k="testes" data-multi="1" value="${id}" ${avMarcados().includes(id) ? 'checked' : ''}><span>${esc(nome)}</span></label>`).join('')}</div></div>`).join('')}</div>
-      <div id="avTestes">${AV_GRUPOS.map(G => `<div class="grp" data-g="${G.g}"><div class="tgt">${esc(G.t)}</div>${G.itens.map(avTeste).join('')}</div>`).join('')}</div>
+      <div id="avTestes">${AV_GRUPOS.map(G => `<div class="grp" data-g="${G.g}"><div class="tgt">${esc(G.t)}</div>${G.g === 'pulm' ? `<div class="form eqpm">${avSel('eq_pm', 'Equação de referência da PiMax e da PeMax', AV_EQ_PM, { full: 1 })}</div>` : ''}${G.itens.map(avTeste).join('')}</div>`).join('')}</div>
     </details>
     ${avSecao(5, 'Conclusão',
       avTx('diagfisio', 'Diagnóstico fisioterapêutico', { rows: 4 }) + avTx('objetivos', 'Objetivos terapêuticos', { rows: 3 }) + avTx('conclusao', 'Conclusão', { rows: 4 }))}
@@ -331,7 +342,7 @@ function avAtualizar(semRascunho){
     set('pc_' + id, t.pct != null ? fmtNum(t.pct, 0) + '%' : '—');
     set('cl_' + id, t.cls || '—');
     if (AV_REF[id]) set('rf_' + id, t.falta ? 'Para calcular o predito, preencha: ' + t.falta.join(', ') + '.'
-      : [AV_REF[id].fonte, t.lin != null ? `limite inferior ${fmtNum(t.lin, 1)} ${un}` : '', AV_REF[id].menorMelhor ? 'tempo: quanto menor, melhor' : '', t.aviso || ''].filter(Boolean).join(' · ')); }));
+      : [refDe(id, v).fonte, t.lin != null ? `limite inferior ${fmtNum(t.lin, 1)} ${un}` : '', refDe(id, v).menorMelhor ? 'tempo: quanto menor, melhor' : '', t.aviso || ''].filter(Boolean).join(' · ')); }));
   // selos "Preenchido"
   const tem = el => [...el.querySelectorAll('[data-k]')].some(i => i.dataset.multi ? i.checked : (i.value || '').trim() !== '');
   let nTestes = 0;

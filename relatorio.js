@@ -213,12 +213,12 @@ function gerarPdfAvaliacao(x){
       if (!tem) itens.push(paragrafo('Resultado não registrado.', { s: 8, it: true, cor: C.mut }));
       else if (tipo === 'txt'){ if (v[`t_${id}_r`]) itens.push(paragrafo(v[`t_${id}_r`])); }
       else {
-        let r = num(v[`t_${id}_r`]); if (AV_REF[id] && AV_REF[id].abs && r != null) r = Math.abs(r);
+        let r = num(v[`t_${id}_r`]); const RF = refDe(id, v); if (RF && RF.abs && r != null) r = Math.abs(r);
         const partes = [r != null ? `Valor obtido${id === 'preensao' && avMaos(v).usada ? ' (mão ' + avMaos(v).usada + ')' : ''}: ${un(fmtNum(r, 2), u)}` : '', t.pct != null ? `${fmtNum(t.pct, 0)}% do predito` : '',
           t.pred != null ? `Valor de referência (predito): ${un(n2(t.pred), u)}` : '', t.lin != null ? `Limite inferior: ${un(fmtNum(t.lin, 1), u)}${r != null ? (r < t.lin ? ' (resultado abaixo do limite)' : ' (resultado dentro do esperado)') : ''}` : '', t.cls ? `Classificação: ${t.cls}` : ''].filter(Boolean);
         if (partes.length) itens.push(paragrafo(partes.join('; ') + '.', { b: true }));
         if (t.aviso) itens.push(paragrafo('Atenção: ' + t.aviso + '.', { s: 7.4, it: true, cor: C.mut }));
-        if (t.lin != null && AV_REF[id] && AV_REF[id].linNota) itens.push(paragrafo('Limite inferior = ' + AV_REF[id].linNota + '.', { s: 7.4, it: true, cor: C.mut }));
+        if (t.lin != null && RF && RF.linNota) itens.push(paragrafo('Limite inferior = ' + RF.linNota + '.', { s: 7.4, it: true, cor: C.mut }));
         if (t.falta) itens.push(paragrafo('Predito não calculado: faltou ' + t.falta.join(', ') + '.', { s: 7.4, it: true, cor: C.mut }));
         if (!t.fonte && t.pred != null) itens.push(paragrafo('Valor de referência informado pela fisioterapeuta.', { s: 7.4, it: true, cor: C.mut }));
         itens.push(espaco(1.5));
