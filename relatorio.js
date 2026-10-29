@@ -4,6 +4,10 @@
 
 // logo carregada uma vez, para entrar no topo e como marca d'água
 let LOGO_AP = null;
+// fonte Noto Sans (a mesma do relatório de referência), só com os caracteres usados em português
+const FONTES_AP = {};
+const lerBase64 = async url => { const b = await (await fetch(url)).blob(); const d = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); }); return String(d).split(',')[1]; };
+(async () => { try { for (const [k, f] of [['normal', 'NotoSans_400Regular'], ['bold', 'NotoSans_700Bold'], ['italic', 'NotoSans_400Regular_Italic']]) FONTES_AP[k] = await lerBase64(`fonts/${f}.ttf`); } catch(e){} })();
 (async () => { try { const b = await (await fetch('icons/logo-ap.jpg')).blob(); LOGO_AP = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); }); } catch(e){} })();
 
 // explicação curta de cada teste (texto próprio do app)
@@ -47,11 +51,16 @@ function gerarPdfAvaliacao(x){
   if (!J){ toast('Não consegui carregar o gerador de PDF. Confira a internet e tente de novo.'); return false; }
   const v = x.av || {}, K = x.calc && x.calc.testes ? x.calc : avCalc(v);
   const doc = new J({ unit: 'mm', format: 'a4' });
-  const M = 13, W = 210 - 2 * M, TOP = 14, BOT = 284, PAD = 5, IW = W - 2 * PAD;
+  const M = 10, W = 210 - 2 * M, TOP = 10, BOT = 285, PAD = 4, IW = W - 2 * PAD;
   const C = { tx: [31, 41, 55], mut: [107, 114, 128], borda: [226, 230, 235], fundo: [248, 249, 251], barra: [55, 65, 81], res: [20, 137, 123], ref: [196, 202, 211], grade: [229, 233, 237] };
   let y = TOP;
   const lh = s => s * 0.3528 * 1.42;
-  const fonte = (s, b, cor, it) => { doc.setFont('helvetica', b ? 'bold' : it ? 'italic' : 'normal'); doc.setFontSize(s); doc.setTextColor(...(cor || C.tx)); };
+  let FN = 'helvetica';
+  if (FONTES_AP.normal && FONTES_AP.bold && FONTES_AP.italic) try {
+    [['normal', 'NotoSans-Regular.ttf'], ['bold', 'NotoSans-Bold.ttf'], ['italic', 'NotoSans-Italic.ttf']].forEach(([st, arq]) => { doc.addFileToVFS(arq, FONTES_AP[st]); doc.addFont(arq, 'NotoSans', st); });
+    FN = 'NotoSans';
+  } catch(e){ FN = 'helvetica'; }
+  const fonte = (s, b, cor, it) => { doc.setFont(FN, b ? 'bold' : it ? 'italic' : 'normal'); doc.setFontSize(s); doc.setTextColor(...(cor || C.tx)); };
   const novaPagina = () => { doc.addPage(); y = TOP; };
   const dataAv = v.quando ? fmtD(v.quando.slice(0, 10)) : fmtD(x.data);
   const dataHora = dataAv + (v.quando && v.quando.length > 10 ? ', ' + v.quando.slice(11, 16) : '');
@@ -144,15 +153,16 @@ function gerarPdfAvaliacao(x){
   const cabecalhoGrupo = (t, prox = 30) => { if (y + 11 + prox > BOT) novaPagina(); fonte(9, true); doc.text(t, M, y + 4); doc.setDrawColor(...C.borda); doc.setLineWidth(0.3); doc.line(M, y + 6.5, M + W, y + 6.5); y += 11; };
 
   // ----- topo -----
-  if (LOGO_AP) try { doc.addImage(LOGO_AP, 'JPEG', 68, y - 2, 24, 19.2); } catch(e){}
-  fonte(11, true); doc.text('Relatório de Avaliação Funcional', LOGO_AP ? 96 : 105, y + 9, LOGO_AP ? {} : { align: 'center' });
-  y += 21; doc.setDrawColor(...C.borda); doc.setLineWidth(0.3); doc.line(M, y, M + W, y); y += 5;
+  // mesmas medidas do relatório de referência: logo à esquerda do título, linha abaixo
+  if (LOGO_AP) try { doc.addImage(LOGO_AP, 'JPEG', 64.5, 9.6, 20, 16); } catch(e){}
+  fonte(10, true); doc.text('Relatório de Avaliação Funcional', LOGO_AP ? 92 : 105, 18.4, LOGO_AP ? {} : { align: 'center' });
+  doc.setDrawColor(...C.borda); doc.setLineWidth(0.3); doc.line(M, 28.9, M + W, 28.9); y = 34;
 
   // ----- paciente -----
-  { const h = 22; doc.setFillColor(...C.fundo); doc.setDrawColor(...C.borda); doc.roundedRect(M, y, W, h, 2.5, 2.5, 'FD');
-    fonte(11, true); doc.text(x.pnome || '', M + PAD, y + 7.5);
+  { const h = 21.2; doc.setFillColor(...C.fundo); doc.setDrawColor(...C.borda); doc.setLineWidth(0.25); doc.roundedRect(M, y, W, h, 2, 2, 'FD');
+    fonte(10.5, true); doc.text(x.pnome || '', M + PAD, y + 6.2);
     const cols = [['Idade', K.idade != null ? K.idade + ' anos' : '—'], ['Nascimento', v.nasc ? fmtD(v.nasc) : '—'], ['Sexo', v.sexo ? rotulo(AV_SEXO, v.sexo) : '—'], ['Avaliação', dataHora]];
-    cols.forEach(([r, val], i) => { const cx = M + PAD + i * (IW / 4); fonte(6.5, true, C.mut); doc.text(r.toUpperCase(), cx, y + 13.5); fonte(8.6, false); doc.text(val, cx, y + 18.5); });
+    cols.forEach(([r, val], i) => { const cx = M + PAD + i * 47.2; fonte(5.8, true, C.mut); doc.text(r.toUpperCase(), cx, y + 13.4, { charSpace: 0.25 }); fonte(8, false); doc.text(val, cx, y + 17.5); });
     y += h + 5; }
 
   // ----- anamnese -----
