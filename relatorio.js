@@ -156,7 +156,7 @@ function gerarPdfAvaliacao(x){
   // mesmas medidas do relatório de referência: logo à esquerda do título, linha abaixo
   if (LOGO_AP) try { doc.addImage(LOGO_AP, 'JPEG', 64.5, 9.6, 20, 16); } catch(e){}
   fonte(10, true); doc.text('Relatório de Avaliação Funcional', LOGO_AP ? 92 : 105, 18.4, LOGO_AP ? {} : { align: 'center' });
-  doc.setDrawColor(...C.borda); doc.setLineWidth(0.3); doc.line(M, 28.9, M + W, 28.9); y = 34;
+  doc.setDrawColor(31, 48, 82); doc.setLineWidth(0.5); doc.line(M, 28.9, M + W, 28.9); y = 34;
 
   // ----- paciente -----
   { const h = 21.2; doc.setFillColor(...C.fundo); doc.setDrawColor(...C.borda); doc.setLineWidth(0.25); doc.roundedRect(M, y, W, h, 2, 2, 'FD');
