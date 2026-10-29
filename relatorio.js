@@ -92,13 +92,13 @@ function gerarPdfAvaliacao(x){
     const h = 50;
     return { h: h + 4, draw: (x0, y0) => {
       doc.setFillColor(...C.fundo); doc.setDrawColor(...C.borda); doc.setLineWidth(0.2); doc.roundedRect(x0, y0, IW, h, 2, 2, 'FD');
-      const base = y0 + h - 15, alto = 26, max = Math.max(...barras.map(b => b[1]), linha ? linha[0] : 0) * 1.15 || 1, cx = x0 + IW / 2, bw = 6, gap = 2, x1 = cx - (barras.length * bw + (barras.length - 1) * gap) / 2;
+      const base = y0 + h - 15, alto = 26, max = Math.max(...barras.map(b => b[1]), linha ? linha[0] : 0) * 1.15 || 1, cx = x0 + IW / 2, bw = 8, gap = 5, x1 = cx - (barras.length * bw + (barras.length - 1) * gap) / 2;
       doc.setDrawColor(...C.grade); doc.setLineDashPattern([0.8, 0.8], 0);
       for (let i = 0; i <= 3; i++){ const gy = base - alto * i / 3; doc.line(x0 + 30, gy, x0 + IW - 30, gy); }
       doc.setLineDashPattern([], 0);
       barras.forEach(([, val, cor], i) => { const bx = x1 + i * (bw + gap), ref = /^(Referência|Predito)/.test(barras[i][0]);
         const bh = Math.max(0.6, val / max * alto); doc.setFillColor(...cor); doc.rect(bx, base - bh, bw, bh, 'F');
-        fonte(7.5, true, ref ? C.mut : C.tx); doc.text(fmtNum(val, val < 10 ? 2 : 0), bx + bw / 2, base - bh - 1.6, { align: 'center' });
+        fonte(7.5, true, ref ? C.mut : C.tx); doc.text(fmtNum(val, val < 100 ? 2 : 0), bx + bw / 2, base - bh - 1.6, { align: 'center' });
       });
       if (linha){ const ly0 = base - linha[0] / max * alto; doc.setDrawColor(178, 59, 59); doc.setLineWidth(0.35); doc.setLineDashPattern([1.2, 0.8], 0); doc.line(x0 + 30, ly0, x0 + IW - 30, ly0); doc.setLineDashPattern([], 0);
         fonte(6.5, false, [178, 59, 59]); doc.text(linha[1], x0 + IW - 30, ly0 - 1, { align: 'right' }); }
