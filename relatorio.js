@@ -213,11 +213,12 @@ function gerarPdfAvaliacao(x){
       if (!tem) itens.push(paragrafo('Resultado não registrado.', { s: 8, it: true, cor: C.mut }));
       else if (tipo === 'txt'){ if (v[`t_${id}_r`]) itens.push(paragrafo(v[`t_${id}_r`])); }
       else {
-        const r = num(v[`t_${id}_r`]);
+        let r = num(v[`t_${id}_r`]); if (AV_REF[id] && AV_REF[id].abs && r != null) r = Math.abs(r);
         const partes = [r != null ? `Valor obtido${id === 'preensao' && avMaos(v).usada ? ' (mão ' + avMaos(v).usada + ')' : ''}: ${un(fmtNum(r, 2), u)}` : '', t.pct != null ? `${fmtNum(t.pct, 0)}% do predito` : '',
-          t.pred != null ? `Valor de referência (predito): ${un(n2(t.pred), u)}` : '', t.lin != null ? `Limite inferior: ${un(fmtNum(t.lin, 0), u)}` : '', t.cls ? `Classificação: ${t.cls}` : ''].filter(Boolean);
+          t.pred != null ? `Valor de referência (predito): ${un(n2(t.pred), u)}` : '', t.lin != null ? `Limite inferior: ${un(fmtNum(t.lin, 1), u)}${r != null ? (r < t.lin ? ' (resultado abaixo do limite)' : ' (resultado dentro do esperado)') : ''}` : '', t.cls ? `Classificação: ${t.cls}` : ''].filter(Boolean);
         if (partes.length) itens.push(paragrafo(partes.join('; ') + '.', { b: true }));
         if (t.aviso) itens.push(paragrafo('Atenção: ' + t.aviso + '.', { s: 7.4, it: true, cor: C.mut }));
+        if (t.lin != null && AV_REF[id] && AV_REF[id].linNota) itens.push(paragrafo('Limite inferior = ' + AV_REF[id].linNota + '.', { s: 7.4, it: true, cor: C.mut }));
         if (t.falta) itens.push(paragrafo('Predito não calculado: faltou ' + t.falta.join(', ') + '.', { s: 7.4, it: true, cor: C.mut }));
         if (!t.fonte && t.pred != null) itens.push(paragrafo('Valor de referência informado pela fisioterapeuta.', { s: 7.4, it: true, cor: C.mut }));
         itens.push(espaco(1.5));
@@ -231,7 +232,7 @@ function gerarPdfAvaliacao(x){
         if (maos && t.maos) itens.push(graficoColunas('', 0, 0, t.maos.flatMap(m => [['Mão ' + m.l, m.val, m.l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]], ['Predito ' + m.l, m.pred, C.ref]]), t.corte ? [t.corte, `corte EWGSOP2: ${t.corte} kgf`] : null));
         else if (maos && maos.lista.length) itens.push(graficoColunas('', 0, 0, [...maos.lista.map(([l, val]) => ['Mão ' + l, val, l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]]), ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
         else if (id === 'preensao' && r != null) itens.push(graficoColunas('', 0, 0, [['Resultado', r, C.res], ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
-        else if (r != null && t.pred > 0) itens.push(graficoColunas(tipo === 'extra' ? 'Resultado' : nm.split(' (')[0].length <= 14 ? nm : 'Resultado', r, t.pred));
+        else if (r != null && t.pred > 0) itens.push(graficoColunas(tipo === 'extra' ? 'Resultado' : nm.split(' (')[0].length <= 14 ? nm : 'Resultado', r, t.pred, null, t.lin != null ? [t.lin, `limite inferior: ${fmtNum(t.lin, 1)}${u ? ' ' + u : ''}`] : null));
         else if (r != null && t.cls) itens.push(graficoFaixa(r, AV_CLS[id], u, t.cls));
       }
       if (v[`t_${id}_o`]) itens.push(obs(v[`t_${id}_o`]));

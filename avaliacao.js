@@ -98,8 +98,13 @@ const avCtx = v => ({ sexo: v.sexo || '', idade: avIdade(v), alt: num(v.altura),
 const AV_PRECISA = { sexo: 'sexo', idade: 'data de nascimento', alt: 'altura', peso: 'massa' };
 // equações de valor predito
 const AV_REF = {
-  pimax: { fonte: 'Neder et al., 1999', faixa: [20, 80], usa: ['sexo', 'idade'], pred: c => c.sexo === 'F' ? 110.4 - 0.49 * c.idade : 155.3 - 0.80 * c.idade },
-  pemax: { fonte: 'Neder et al., 1999', faixa: [20, 80], usa: ['sexo', 'idade'], pred: c => c.sexo === 'F' ? 115.6 - 0.61 * c.idade : 165.3 - 0.81 * c.idade },
+  // Neder et al., 1999 (Braz J Med Biol Res 32:719-27), 100 adultos de 20 a 80 anos. Equações e erro-padrão (EPE) da figura 1.
+  // Limite inferior = predito − 1,645 × EPE (5º percentil; cálculo do app, o artigo não traz esse limite).
+  // O valor da PiMax é usado sem sinal (o manovacuômetro pode mostrar −40; a conta usa 40).
+  pimax: { fonte: 'Neder et al., 1999', faixa: [20, 80], usa: ['sexo', 'idade'], abs: 1, pred: c => c.sexo === 'F' ? 110.4 - 0.49 * c.idade : 155.3 - 0.80 * c.idade,
+    lin: (c, p) => p - 1.645 * (c.sexo === 'F' ? 9.1 : 17.3), linNota: 'predito − 1,645 × erro-padrão da equação' },
+  pemax: { fonte: 'Neder et al., 1999', faixa: [20, 80], usa: ['sexo', 'idade'], abs: 1, pred: c => c.sexo === 'F' ? 115.6 - 0.61 * c.idade : 165.3 - 0.81 * c.idade,
+    lin: (c, p) => p - 1.645 * (c.sexo === 'F' ? 11.2 : 15.6), linNota: 'predito − 1,645 × erro-padrão da equação' },
   tc6: { fonte: 'Enright & Sherrill, 1998', faixa: [40, 80], usa: ['sexo', 'idade', 'alt', 'peso'],
     pred: c => c.sexo === 'F' ? 2.11 * c.alt - 2.29 * c.peso - 5.78 * c.idade + 667 : 7.57 * c.alt - 5.02 * c.idade - 1.76 * c.peso - 309,
     lin: (c, p) => p - (c.sexo === 'F' ? 139 : 153) },
@@ -152,7 +157,7 @@ function avCalc(v){
   const ci = num(v.cintura), qu = num(v.quadril); if (ci && qu) out.rcq = ci / qu;
   AV_GRUPOS.forEach(G => G.itens.forEach(([id, , , temPred, tipo]) => {
     if (tipo === 'txt') return;
-    const r = num(v[`t_${id}_r`]), R = AV_REF[id], C = AV_CLS[id], t = {};
+    const R = AV_REF[id], C = AV_CLS[id], t = {}; let r = num(v[`t_${id}_r`]); if (R && R.abs && r != null) r = Math.abs(r);
     if (R){
       const falta = R.usa.filter(k => c[k] == null || c[k] === '');
       if (falta.length) t.falta = falta.map(k => AV_PRECISA[k]);
@@ -326,7 +331,7 @@ function avAtualizar(semRascunho){
     set('pc_' + id, t.pct != null ? fmtNum(t.pct, 0) + '%' : '—');
     set('cl_' + id, t.cls || '—');
     if (AV_REF[id]) set('rf_' + id, t.falta ? 'Para calcular o predito, preencha: ' + t.falta.join(', ') + '.'
-      : [AV_REF[id].fonte, t.lin != null ? `limite inferior ${fmtNum(t.lin, 0)} ${un}` : '', AV_REF[id].menorMelhor ? 'tempo: quanto menor, melhor' : '', t.aviso || ''].filter(Boolean).join(' · ')); }));
+      : [AV_REF[id].fonte, t.lin != null ? `limite inferior ${fmtNum(t.lin, 1)} ${un}` : '', AV_REF[id].menorMelhor ? 'tempo: quanto menor, melhor' : '', t.aviso || ''].filter(Boolean).join(' · ')); }));
   // selos "Preenchido"
   const tem = el => [...el.querySelectorAll('[data-k]')].some(i => i.dataset.multi ? i.checked : (i.value || '').trim() !== '');
   let nTestes = 0;
