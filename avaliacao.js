@@ -19,19 +19,25 @@ function ditar(alvo, btn, opts = {}){
   const falha = m => { if (opts.onFalha) opts.onFalha(m); else toast(m); };
   if (!SRec){ falha('Este navegador não transcreve. Toque no campo de texto e use o microfone do teclado do celular.'); return false; }
   const el = document.getElementById(alvo); if (!el) return false;
-  const st = { alvo, btn, base: el.value, rec: null, erro: null, mudo: 0 };
+  const ce = el.isContentEditable, st = { alvo, btn, base: el.value, rec: null, erro: null, mudo: 0, node: null };
   const nova = () => {
     const rec = new SRec(); rec.lang = 'pt-BR'; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
     rec.onresult = e => {
       let txt = ''; for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
       const alvoEl = document.getElementById(alvo); if (!alvoEl) return pararDitado();
-      st.mudo = 0; alvoEl.value = juntarTexto(st.base, txt); alvoEl.dispatchEvent(new Event('input', { bubbles: true }));
+      st.mudo = 0;
+      if (ce){ // campo formatado: o texto falado entra no fim, sem mexer na formatação que já existe
+        if (!st.node || !alvoEl.contains(st.node)){ const ult = alvoEl.lastElementChild && /^(DIV|P|BLOCKQUOTE|LI)$/.test(alvoEl.lastElementChild.tagName) ? alvoEl.lastElementChild : alvoEl;
+          st.sep = (alvoEl.textContent || '').trim() ? ' ' : ''; st.node = document.createTextNode(''); ult.appendChild(st.node); }
+        st.node.data = st.sep + txt.trim();
+      } else alvoEl.value = juntarTexto(st.base, txt);
+      alvoEl.dispatchEvent(new Event('input', { bubbles: true }));
     };
     rec.onerror = e => { st.erro = e.error; };
     rec.onend = () => {
       if (dit !== st) return;
       const alvoEl = document.getElementById(alvo); if (!alvoEl) return pararDitado();
-      st.base = alvoEl.value;
+      if (ce) st.node = null; else st.base = alvoEl.value;
       const er = st.erro; st.erro = null;
       if (er === 'not-allowed' || er === 'service-not-allowed'){ pararDitado(); return falha('A transcrição foi bloqueada. Libere o microfone para este app nas configurações do celular.'); }
       if (er === 'audio-capture'){ pararDitado(); return falha('O microfone está ocupado e a transcrição não ligou.'); }
@@ -204,7 +210,7 @@ function vAvaliacoes(){
 const avv = k => { const v = (avAtual.av || {})[k]; return v == null ? '' : v; };
 const avIn = (k, l, o = {}) => `<label class="${o.full ? 'full' : ''}">${esc(l)}${o.req ? ' *' : ''}<input data-k="${k}" type="${o.t || 'text'}" ${o.t === 'number' ? 'inputmode="decimal" step="any"' : ''} ${o.list ? `list="${o.list}"` : ''} value="${esc(avv(k))}" ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} ${o.dis ? 'disabled' : ''} autocomplete="off"></label>`;
 const avSel = (k, l, ops, o = {}) => `<label class="${o.full ? 'full' : ''}">${esc(l)}${o.req ? ' *' : ''}<select data-k="${k}" ${o.dis ? 'disabled' : ''}><option value="">Escolha…</option>${ops.map(([v, t]) => `<option value="${esc(v)}" ${String(avv(k)) === String(v) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
-const avTx = (k, l, o = {}) => `<div class="fl full"><div class="lrow"><span>${esc(l)}</span>${micBtn('av_' + k)}</div><textarea id="av_${k}" data-k="${k}" rows="${o.rows || 3}" ${o.ph ? `placeholder="${esc(o.ph)}"` : ''}>${esc(avv(k))}</textarea></div>`;
+const avTx = (k, l, o = {}) => `<div class="fl full rtw" style="--rt-min:${(o.rows || 3) * 1.6 + 0.8}em"><div class="lrow"><span>${esc(l)}</span>${micBtn('av_' + k)}</div>${rtCampo('av_' + k, k, avv(k), o.ph)}</div>`;
 const avChk = (k, l, ops) => { const sel = Array.isArray(avv(k)) ? avv(k) : []; return `<fieldset class="full multi"><legend>${esc(l)}</legend>${ops.map(([v, t]) => `<label class="chk"><input type="checkbox" data-k="${k}" data-multi="1" value="${v}" ${sel.includes(v) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</fieldset>`; };
 const selo = '<span class="chip ok selo" hidden>Preenchido</span>';
 
@@ -294,7 +300,7 @@ function avForm(id, base){
       ${fin ? `<button type="button" class="btn" data-act="av-pdf" data-id="${id}">${ICON.pdf}Baixar PDF</button>` : ''}<span class="sp"></span>
       <button type="button" class="btn" data-act="close">Fechar</button>
       ${ro ? '' : `<button type="button" class="btn" data-act="av-salvar">Salvar rascunho</button><button type="button" class="btn pri" data-act="av-final">${fin ? 'Salvar e gerar PDF' : 'Finalizar e gerar PDF'}</button>`}</div></div>`;
-  if (ro) d.querySelectorAll('#avForm input,#avForm select,#avForm textarea').forEach(el => el.disabled = true);
+  if (ro){ d.querySelectorAll('#avForm input,#avForm select,#avForm textarea').forEach(el => el.disabled = true); d.querySelectorAll('#avForm .rt').forEach(el => el.setAttribute('contenteditable', 'false')); d.querySelectorAll('#avForm .rt-bar').forEach(el => el.remove()); }
   if (!d.open) d.showModal();
   avAtualizar(true);
 }
@@ -315,6 +321,7 @@ function avLer(){
   f.querySelectorAll('[data-k]').forEach(el => {
     const k = el.dataset.k;
     if (el.dataset.multi){ v[k] = v[k] || []; if (el.checked) v[k].push(el.value); return; }
+    if (el.dataset.rico){ if (!rtVazio(el)) v[k] = rtLimpar(el.innerHTML); return; }
     const x = (el.value || '').trim(); if (x !== '') v[k] = x;
   });
   Object.keys(v).forEach(k => { if (Array.isArray(v[k]) && !v[k].length) delete v[k]; });
@@ -344,7 +351,7 @@ function avAtualizar(semRascunho){
     if (AV_REF[id]) set('rf_' + id, t.falta ? 'Para calcular o predito, preencha: ' + t.falta.join(', ') + '.'
       : [refDe(id, v).fonte, t.lin != null ? `limite inferior ${fmtNum(t.lin, 1)} ${un}` : '', refDe(id, v).menorMelhor ? 'tempo: quanto menor, melhor' : '', t.aviso || ''].filter(Boolean).join(' · ')); }));
   // selos "Preenchido"
-  const tem = el => [...el.querySelectorAll('[data-k]')].some(i => i.dataset.multi ? i.checked : (i.value || '').trim() !== '');
+  const tem = el => [...el.querySelectorAll('[data-k]')].some(i => i.dataset.multi ? i.checked : i.dataset.rico ? !rtVazio(i) : (i.value || '').trim() !== '');
   let nTestes = 0;
   f.querySelectorAll('details.tst').forEach(t => { const ok = tem(t); t.querySelector('.selo').hidden = !ok; if (ok && !t.hidden) nTestes++; });
   // só aparecem os testes marcados; o que acabou de ser marcado já abre

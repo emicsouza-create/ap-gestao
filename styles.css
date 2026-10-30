@@ -305,3 +305,17 @@ output.calc{display:flex;align-items:center;min-height:40px;padding:0 10px;borde
 .dlg.av #avTestes .grp{padding:4px 14px 6px}
 .dlg.av #avTestes details.tst{margin:0 0 8px}
 .dlg.av .eqpm{margin:0 0 10px}
+/* texto formatado */
+.dlg.av .rt{min-height:var(--rt-min,5.6em);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);font:400 15px/1.5 var(--body);outline:none;overflow-wrap:anywhere}
+.dlg.av .rt:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.dlg.av .rt:empty::before{content:attr(data-ph);color:var(--muted)}
+.dlg.av .rt blockquote{margin:6px 0;padding:2px 0 2px 12px;border-left:3px solid var(--line);color:var(--muted);font-style:italic}
+.dlg.av .rt ul,.dlg.av .rt ol{margin:4px 0;padding-left:22px}
+.dlg.av .rt font[size="2"]{font-size:13px}.dlg.av .rt font[size="4"]{font-size:18px}.dlg.av .rt font[size="5"]{font-size:21px}
+.dlg.av .rt-bar{display:none;flex-wrap:wrap;gap:4px;margin:0 0 2px}
+.dlg.av .rtw:focus-within .rt-bar{display:flex}
+.dlg.av .rt-b{min-width:38px;min-height:36px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);font:600 14px var(--body);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.dlg.av .rt-b:active{background:var(--accent-soft)}
+.dlg.av .rt-b .al{display:inline-block;width:14px;height:11px;background:linear-gradient(currentColor 0 0) 0 0/100% 1.6px no-repeat,linear-gradient(currentColor 0 0) 0 50%/70% 1.6px no-repeat,linear-gradient(currentColor 0 0) 0 100%/100% 1.6px no-repeat}
+.dlg.av .rt-b .al-c{background-position:0 0,50% 50%,0 100%}.dlg.av .rt-b .al-d{background-position:0 0,100% 50%,0 100%}
+.dlg.av .rt-b .al-j{background-size:100% 1.6px,100% 1.6px,100% 1.6px}

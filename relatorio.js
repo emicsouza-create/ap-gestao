@@ -73,8 +73,50 @@ function gerarPdfAvaliacao(x){
     fonte(s, b, cor, it); const L = doc.splitTextToSize(String(txt), IW);
     return { h: L.length * lh(s) + 1, draw: (x0, y0) => { fonte(s, b, cor, it); L.forEach((l, i) => doc.text(l, x0, y0 + lh(s) * (i + 0.8), i < L.length - 1 && L.length > 1 ? { maxWidth: IW, align: 'justify' } : {})); } };
   };
+  // texto formatado (negrito, itálico, tamanho, alinhamento, citação, lista)
+  const rico = (valor, { s = 8.6 } = {}) => {
+    if (!rtTemHtml(valor)) return paragrafo(valor, { s });
+    const TAM = { 1: 0.75, 2: 0.88, 3: 1, 4: 1.15, 5: 1.32, 6: 1.55, 7: 1.8 }, linhas = [];
+    rtBlocos(valor).forEach((B, bi) => {
+      const ind = (B.citacao ? 6 : 0) + (B.lista ? 5 : 0), larg = IW - ind - (B.citacao ? 2 : 0);
+      // palavras com a fonte de cada trecho; '\n' força quebra
+      const pal = []; B.trechos.forEach(t => { const sz = s * (TAM[t.tam] || 1), fo = { b: t.b, i: t.i || B.citacao, u: t.u, sz };
+        t.t.split(/(\n| )/).forEach(w => { if (w === '\n') pal.push({ br: true }); else if (w === ' ') pal.push({ esp: true, fo }); else if (w) pal.push({ w, fo }); }); });
+      const larguraDe = x => { fonte(x.fo.sz, x.fo.b, null, x.fo.i); return doc.getTextWidth(x.esp ? ' ' : x.w); };
+      let lin = { itens: [], w: 0, alt: 0 }, primeira = true;
+      const fecha = (ultima) => { while (lin.itens.length && lin.itens[lin.itens.length - 1].esp){ lin.w -= lin.itens[lin.itens.length - 1].lw; lin.itens.pop(); }
+        linhas.push(Object.assign(lin, { B, ind, larg, ultima, marcador: primeira && B.lista, alt: Math.max(lin.alt, lh(s)) })); primeira = false; lin = { itens: [], w: 0, alt: 0 }; };
+      pal.forEach(x => {
+        if (x.br){ fecha(true); return; }
+        const lw = larguraDe(x); if (x.esp && !lin.itens.length) return;
+        if (!x.esp && lin.w + lw > larg && lin.itens.length) fecha(false);
+        if (x.esp && !lin.itens.length) return;
+        lin.itens.push(Object.assign({}, x, { lw })); lin.w += lw; lin.alt = Math.max(lin.alt, lh(x.fo.sz));
+      });
+      fecha(true); linhas[linhas.length - 1].fimBloco = true;
+    });
+    const h = linhas.reduce((a, l) => a + l.alt + (l.fimBloco ? 1.6 : 0), 0) + 1;
+    return { h, draw: (x0, y0) => {
+      let yy = y0;
+      linhas.forEach(l => {
+        const B = l.B, sobra = l.larg - l.w, nEsp = l.itens.filter(i => i.esp).length;
+        let xx = x0 + l.ind, extra = 0;
+        if (B.alinha === 'center') xx += sobra / 2; else if (B.alinha === 'right') xx += sobra; else if ((B.alinha === 'justify' || !B.alinha) && !l.ultima && nEsp) extra = sobra / nEsp; // sem alinhamento escolhido: justificado, como no modelo
+        const base = yy + l.alt * 0.78;
+        if (B.citacao){ doc.setFillColor(...C.ref); doc.rect(x0 + 1.5, yy, 0.9, l.alt + (l.fimBloco ? 0.4 : 0), 'F'); }
+        if (l.marcador){ fonte(s, false); doc.text(B.lista, x0 + l.ind - 4, base); }
+        l.itens.forEach(it => {
+          if (it.esp){ xx += it.lw + extra; return; }
+          fonte(it.fo.sz, it.fo.b, B.citacao ? C.mut : null, it.fo.i); doc.text(it.w, xx, base);
+          if (it.fo.u){ doc.setDrawColor(...C.tx); doc.setLineWidth(0.2); doc.line(xx, base + 0.6, xx + it.lw, base + 0.6); }
+          xx += it.lw;
+        });
+        yy += l.alt + (l.fimBloco ? 1.6 : 0);
+      });
+    } };
+  };
   const sub = (rot, txt) => {
-    const p = paragrafo(txt);
+    const p = rico(txt);
     return { h: 8 + p.h + 3, draw: (x0, y0) => { fonte(6.8, true, C.mut); doc.text(rot.toUpperCase(), x0, y0 + 3); doc.setDrawColor(...C.borda); doc.setLineWidth(0.2); doc.line(x0, y0 + 5, x0 + IW, y0 + 5); p.draw(x0, y0 + 7); } };
   };
   const espaco = h => ({ h, draw: () => {} });
@@ -211,7 +253,7 @@ function gerarPdfAvaliacao(x){
       const desc = [AV_DESC[id] || '', refs ? `(${refs})` : ''].filter(Boolean).join(' ');
       if (desc) itens.push(paragrafo(desc), espaco(1.5));
       if (!tem) itens.push(paragrafo('Resultado não registrado.', { s: 8, it: true, cor: C.mut }));
-      else if (tipo === 'txt'){ if (v[`t_${id}_r`]) itens.push(paragrafo(v[`t_${id}_r`])); }
+      else if (tipo === 'txt'){ if (v[`t_${id}_r`]) itens.push(rico(v[`t_${id}_r`])); }
       else {
         let r = num(v[`t_${id}_r`]); const RF = refDe(id, v); if (RF && RF.abs && r != null) r = Math.abs(r);
         const partes = [r != null ? `Valor obtido${id === 'preensao' && avMaos(v).usada ? ' (mão ' + avMaos(v).usada + ')' : ''}: ${un(fmtNum(r, 2), u)}` : '', t.pct != null ? `${fmtNum(t.pct, 0)}% do predito` : '',
@@ -244,9 +286,9 @@ function gerarPdfAvaliacao(x){
   // ----- planejamento -----
   if (v.diagfisio || v.objetivos || v.conclusao){
     cabecalhoGrupo('Planejamento e Diagnóstico');
-    if (v.diagfisio) cartao('Diagnóstico fisioterapêutico', [paragrafo(v.diagfisio)]);
-    if (v.objetivos) cartao('Objetivos terapêuticos', [paragrafo(v.objetivos)]);
-    if (v.conclusao) cartao('Conclusão', [paragrafo(v.conclusao)]);
+    if (v.diagfisio) cartao('Diagnóstico fisioterapêutico', [rico(v.diagfisio)]);
+    if (v.objetivos) cartao('Objetivos terapêuticos', [rico(v.objetivos)]);
+    if (v.conclusao) cartao('Conclusão', [rico(v.conclusao)]);
   }
   { if (y + 15 > 290) novaPagina(); y += 2; doc.setDrawColor(...C.borda); doc.setFillColor(255, 255, 255); doc.roundedRect(M, y, W, 13, 2.5, 2.5, 'FD');
     fonte(8, false, C.mut); const pre = 'Profissional responsável: '; doc.text(pre, M + PAD + 2, y + 8); fonte(8, true, C.barra); doc.text(v.fisio || x.fisio || '', M + PAD + 2 + doc.getTextWidth(pre) + 0.5, y + 8); }
