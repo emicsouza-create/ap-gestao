@@ -232,14 +232,14 @@ function avTeste([id, nome, un, pred, tipo]){
     + avIn('t_preensao_e', `Mão esquerda (${un})`, { t: 'number' }).replace('<label class="', '<label data-mao="esq" class="')
     + avIn(`t_${id}_p`, `Predito manual (${un})`, { t: 'number' }).replace('<label class="', '<label id="lbl_pmanual" class="')
     + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label><label class="full">Classificação<output id="cl_${id}" class="calc">—</output></label><p class="ref full" id="mao_${id}"></p>`
-    + avIn(`t_${id}_o`, 'Observações', { full: 1 });
+    + avTx(`t_${id}_o`, 'Observações', { rows: 2 });
   else if (tipo === 'txt') corpo = avTx(`t_${id}_r`, 'Resultado e achados', { rows: 3 });
   else corpo = (tipo === 'extra' ? avIn(`t_${id}_n`, 'Nome do teste') + avIn(`t_${id}_u`, 'Unidade') : '')
     + avIn(`t_${id}_r`, 'Resultado' + (un ? ` (${un})` : ''), { t: 'number' })
     + (AV_REF[id] ? `<label>Predito${un ? ` (${un})` : ''}<output id="pr_${id}" class="calc">—</output></label><label>% do predito<output id="pc_${id}" class="calc">—</output></label><p class="ref full" id="rf_${id}"></p>`
       : pred ? avIn(`t_${id}_p`, 'Predito' + (un ? ` (${un})` : ''), { t: 'number' }) + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label>` : '')
     + (AV_CLS[id] ? `<label class="full">Classificação<output id="cl_${id}" class="calc">—</output></label><p class="ref full">${esc(AV_CLS[id].fonte)}</p>` : '')
-    + avIn(`t_${id}_o`, 'Observações', { full: 1 });
+    + avTx(`t_${id}_o`, 'Observações', { rows: 2 });
   return `<details class="tst" data-t="${id}"><summary><span class="nm">${esc(nome)}</span>${selo}</summary><div class="form">${corpo}</div></details>`;
 }
 function avSecao(n, titulo, corpo, cls){
@@ -277,7 +277,7 @@ function avForm(id, base){
       + avChk('comorb', 'Comorbidades', AV_COMORB)
       + AV_ANAM2.map(([k, l]) => avTx(k, l)).join('')
       + avSel('evolucao', 'Evolução', AV_EVOL) + avSel('respiracao', 'Respiração', AV_RESP)
-      + avIn('protese', 'Prótese ventilatória', { full: 1 }))}
+      + avTx('protese', 'Prótese ventilatória', { rows: 1 }))}
     ${avSecao(3, 'Dados vitais e composição corporal',
       AV_VITAIS.map(([k, l, un, t]) => avIn(k, `${l} (${un})`, { t: t || 'number' })).join('')
       + avTx('ausculta', 'Ausculta pulmonar', { rows: 2 }) + avTx('pmv', 'Padrão muscular ventilatório', { rows: 2 })
@@ -286,11 +286,10 @@ function avForm(id, base){
       + avIn('pescoco', 'Circunferência do pescoço (cm)', { t: 'number' })
       + avIn('cintura', 'Circunferência da cintura (cm)', { t: 'number' }) + avIn('quadril', 'Circunferência do quadril (cm)', { t: 'number' })
       + '<label>Relação cintura-quadril (calculada)<output id="avRcq" class="calc">—</output></label>'
-      + avIn('fonte', 'Fonte dos dados', { full: 1, ph: 'Ex.: medido na avaliação, informado pela família' }))}
+      + avTx('fonte', 'Fonte dos dados', { rows: 1, ph: 'Ex.: medido na avaliação, informado pela família' }))}
     <details class="avsec" data-s="4" open><summary><span class="nm">4. Testes</span><span class="chip mute" id="avCnt"></span></summary>
-      <p class="sub" style="margin:8px 14px">Marque os testes que você vai fazer. Só os marcados abrem para preencher e entram no relatório.</p>
-      <div class="tsel">${AV_GRUPOS.map(G => `<div class="tgrp"><div class="tgt">${esc(G.t)}</div><div class="pills">${G.itens.map(([id, nome]) => `<label class="pill"><input type="checkbox" data-k="testes" data-multi="1" value="${id}" ${avMarcados().includes(id) ? 'checked' : ''}><span>${esc(nome)}</span></label>`).join('')}</div></div>`).join('')}</div>
-      <div id="avTestes">${AV_GRUPOS.map(G => `<div class="grp" data-g="${G.g}"><div class="tgt">${esc(G.t)}</div>${G.g === 'pulm' ? `<div class="form eqpm">${avSel('eq_pm', 'Equação de referência da PiMax e da PeMax', AV_EQ_PM, { full: 1 })}</div>` : ''}${G.itens.map(avTeste).join('')}</div>`).join('')}</div>
+      <p class="sub" style="margin:8px 14px">Abra o grupo e preencha os testes que você fez. No relatório entram só os testes preenchidos.</p>
+      ${AV_GRUPOS.map(G => `<details class="grp" data-g="${G.g}"><summary><span class="nm">${esc(G.t)}</span><span class="chip ok cnt" hidden></span></summary>${G.g === 'pulm' ? `<div class="form eqpm">${avSel('eq_pm', 'Equação de referência da PiMax e da PeMax', AV_EQ_PM, { full: 1 })}</div>` : ''}${G.itens.map(avTeste).join('')}</details>`).join('')}
     </details>
     ${avSecao(5, 'Conclusão',
       avTx('diagfisio', 'Diagnóstico fisioterapêutico', { rows: 4 }) + avTx('objetivos', 'Objetivos terapêuticos', { rows: 3 }) + avTx('conclusao', 'Conclusão', { rows: 4 }))}
@@ -304,10 +303,9 @@ function avForm(id, base){
   if (!d.open) d.showModal();
   avAtualizar(true);
 }
-// testes marcados; avaliações antigas (sem a lista) consideram marcados os que têm algum valor
+// testes preenchidos (são os que entram no relatório)
 function avMarcados(v){
   v = v || avAtual.av || {};
-  if (Array.isArray(v.testes)) return v.testes;
   const L = []; AV_GRUPOS.forEach(G => G.itens.forEach(([id]) => { if (['r', 'p', 'o', 'n'].some(s => v[`t_${id}_${s}`])) L.push(id); })); return L;
 }
 document.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.k === 'pnome' && e.target.closest('#avForm')){ const v = { pnome: e.target.value }; if (avNascCadastro(v)){ const n = $('#avForm [data-k="nasc"]'); if (n && !n.value){ n.value = v.nasc; avAtualizar(); } } } });
@@ -353,15 +351,12 @@ function avAtualizar(semRascunho){
   // selos "Preenchido"
   const tem = el => [...el.querySelectorAll('[data-k]')].some(i => i.dataset.multi ? i.checked : i.dataset.rico ? !rtVazio(i) : (i.value || '').trim() !== '');
   let nTestes = 0;
-  f.querySelectorAll('details.tst').forEach(t => { const ok = tem(t); t.querySelector('.selo').hidden = !ok; if (ok && !t.hidden) nTestes++; });
-  // só aparecem os testes marcados; o que acabou de ser marcado já abre
-  const marc = v.testes || [];
-  f.querySelectorAll('details.tst').forEach(t => { const on = marc.includes(t.dataset.t); if (on && t.hidden) t.open = true; t.hidden = !on; });
-  f.querySelectorAll('#avTestes .grp').forEach(g => { g.hidden = !g.querySelector('details.tst:not([hidden])'); });
+  f.querySelectorAll('details.tst').forEach(t => { const ok = tem(t); t.querySelector('.selo').hidden = !ok; if (ok) nTestes++; });
+  f.querySelectorAll('details.grp').forEach(g => { const n = [...g.querySelectorAll('details.tst')].filter(t => !t.querySelector('.selo').hidden).length; const c = g.querySelector('.cnt'); c.hidden = !n; c.textContent = n + (n > 1 ? ' preenchidos' : ' preenchido'); });
   f.querySelectorAll('details.avsec[data-s]').forEach(s => { const sl = s.querySelector(':scope > summary .selo'); if (!sl) return;
     const n = s.dataset.s; const ok = n === '1' ? ['pnome','quando','fisio','situacao','sexo','ficha'].every(k => v[k]) : n === '3' ? !!(v.altura && v.massa) : n === '5' ? !!(v.diagfisio && v.objetivos) : tem(s);
     sl.hidden = !ok; });
-  const cnt = $('#avCnt'); if (cnt) cnt.textContent = marc.length ? `${marc.length} marcado${marc.length > 1 ? 's' : ''} · ${nTestes} preenchido${nTestes !== 1 ? 's' : ''}` : 'nenhum teste marcado';
+  const cnt = $('#avCnt'); if (cnt) cnt.textContent = nTestes ? nTestes + (nTestes > 1 ? ' testes preenchidos' : ' teste preenchido') : 'nenhum teste preenchido';
   if (!semRascunho){ clearTimeout(avT); avT = setTimeout(() => { try { localStorage.setItem('ap.avDraft.' + (avAtual._id || 'novo'), JSON.stringify({ av: avLer(), em: new Date().toISOString() })); } catch(e){} }, 400); }
 }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#avForm')) avAtualizar(); });

@@ -69,16 +69,16 @@ function gerarPdfAvaliacao(x){
   const n2 = (n, c = 2) => fmtNum(n, c);
 
   // ----- itens que vão dentro dos cartões: cada um sabe medir a própria altura e se desenhar -----
-  const paragrafo = (txt, { s = 8.6, it = false, b = false, cor } = {}) => {
-    fonte(s, b, cor, it); const L = doc.splitTextToSize(String(txt), IW);
-    return { h: L.length * lh(s) + 1, draw: (x0, y0) => { fonte(s, b, cor, it); L.forEach((l, i) => doc.text(l, x0, y0 + lh(s) * (i + 0.8), i < L.length - 1 && L.length > 1 ? { maxWidth: IW, align: 'justify' } : {})); } };
+  const paragrafo = (txt, { s = 8.6, it = false, b = false, cor, larg = IW } = {}) => {
+    fonte(s, b, cor, it); const L = doc.splitTextToSize(String(txt), larg);
+    return { h: L.length * lh(s) + 1, draw: (x0, y0) => { fonte(s, b, cor, it); L.forEach((l, i) => doc.text(l, x0, y0 + lh(s) * (i + 0.8), i < L.length - 1 && L.length > 1 ? { maxWidth: larg, align: 'justify' } : {})); } };
   };
   // texto formatado (negrito, itálico, tamanho, alinhamento, citação, lista)
-  const rico = (valor, { s = 8.6 } = {}) => {
-    if (!rtTemHtml(valor)) return paragrafo(valor, { s });
+  const rico = (valor, { s = 8.6, larg: LW = IW } = {}) => {
+    if (!rtTemHtml(valor)) return paragrafo(valor, { s, larg: LW });
     const TAM = { 1: 0.75, 2: 0.88, 3: 1, 4: 1.15, 5: 1.32, 6: 1.55, 7: 1.8 }, linhas = [];
     rtBlocos(valor).forEach((B, bi) => {
-      const ind = (B.citacao ? 6 : 0) + (B.lista ? 5 : 0), larg = IW - ind - (B.citacao ? 2 : 0);
+      const ind = (B.citacao ? 6 : 0) + (B.lista ? 5 : 0), larg = LW - ind - (B.citacao ? 2 : 0);
       // palavras com a fonte de cada trecho; '\n' força quebra
       const pal = []; B.trechos.forEach(t => { const sz = s * (TAM[t.tam] || 1), fo = { b: t.b, i: t.i || B.citacao, u: t.u, sz };
         t.t.split(/(\n| )/).forEach(w => { if (w === '\n') pal.push({ br: true }); else if (w === ' ') pal.push({ esp: true, fo }); else if (w) pal.push({ w, fo }); }); });
@@ -122,10 +122,10 @@ function gerarPdfAvaliacao(x){
   const espaco = h => ({ h, draw: () => {} });
   // junta vários itens para não separar um teste do seu gráfico entre páginas
   const junto = L => ({ h: L.reduce((a, b) => a + b.h, 0), draw: (x0, y0) => { let yy = y0; L.forEach(it => { it.draw(x0, yy); yy += it.h; }); } });
+  // observação numa caixa cinza (aceita texto formatado)
   const obs = txt => {
-    fonte(8, false, C.mut, true); const L = doc.splitTextToSize(String(txt), IW - 8); const h = L.length * lh(8) + 6;
-    return { h: h + 3, draw: (x0, y0) => { doc.setFillColor(...C.fundo); doc.rect(x0, y0, IW, h, 'F'); doc.setFillColor(...C.ref); doc.rect(x0, y0, 0.8, h, 'F');
-      fonte(8, false, C.mut, true); L.forEach((l, i) => doc.text(l, x0 + 4, y0 + 3 + lh(8) * (i + 0.8))); } };
+    const r = rico(txt, { s: 8, larg: IW - 8 }); const h = r.h + 4;
+    return { h: h + 3, draw: (x0, y0) => { doc.setFillColor(...C.fundo); doc.rect(x0, y0, IW, h, 'F'); doc.setFillColor(...C.ref); doc.rect(x0, y0, 0.8, h, 'F'); r.draw(x0 + 4, y0 + 2); } };
   };
   const tituloTeste = t => { fonte(10, true); const L = doc.splitTextToSize(t.toUpperCase(), IW); return { h: L.length * lh(10) + 2.5, draw: (x0, y0) => { fonte(10, true); L.forEach((l, i) => doc.text(l, x0, y0 + lh(10) * (i + 0.8))); } }; };
   // gráfico de colunas: resultado x referência
@@ -212,7 +212,7 @@ function gerarPdfAvaliacao(x){
 
   // ----- anamnese -----
   const comorb = (v.comorb || []).map(c => rotulo(AV_COMORB, c)).join(', ');
-  const respTxt = [v.respiracao ? rotulo(AV_RESP, v.respiracao) : '', v.protese ? 'prótese ventilatória: ' + v.protese : ''].filter(Boolean).join('; ');
+  const respTxt = [v.respiracao ? rotulo(AV_RESP, v.respiracao) : '', v.protese ? 'prótese ventilatória: ' + rtTexto(v.protese) : ''].filter(Boolean).join('; ');
   cartao('Anamnese', [
     v.diag && sub('Diagnósticos clínicos', v.diag), v.queixa && sub('Queixa principal', v.queixa), v.hda && sub('História da doença atual', v.hda),
     v.hdp && sub('História da doença pregressa', v.hdp), v.antfam && sub('Antecedentes familiares', v.antfam), comorb && sub('Comorbidades', comorb),
@@ -236,15 +236,14 @@ function gerarPdfAvaliacao(x){
   if (K.rcq != null) linhas.push(['Relação cintura-quadril', fmtNum(K.rcq, 2), '—']);
   cartao('Composição corporal', [linhas.length && tabela(['Indicador', dataAv, 'Classificação'], linhas),
     K.imc && paragrafo(`Classificação do IMC: ${K.imc.fonte}${K.imc.aviso ? '. Atenção: ' + K.imc.aviso : ''}.`, { s: 7.2, cor: C.mut, it: true }),
-    v.fonte && paragrafo('Fonte dos dados: ' + v.fonte, { s: 7.2, cor: C.mut, it: true })]);
+    v.fonte && paragrafo('Fonte dos dados: ' + rtTexto(v.fonte), { s: 7.2, cor: C.mut, it: true })]);
 
   // ----- testes: um cartão por grupo -----
   AV_GRUPOS.forEach(G => {
     let itens = [];
     G.itens.forEach(([id, nome, u0, , tipo]) => {
-      // só entram os testes marcados na avaliação
-      if (!avMarcados(v).includes(id)) return;
-      const tem = ['r', 'p', 'o', 'n'].some(s => v[`t_${id}_${s}`]);
+      // só entram os testes preenchidos
+      const tem = ['r', 'p', 'o', 'n'].some(s => v[`t_${id}_${s}`]); if (!tem) return;
       const t = K.testes[id] || {}, u = tipo === 'extra' ? (v[`t_${id}_u`] || '') : u0, nm = tipo === 'extra' ? (v[`t_${id}_n`] || nome) : nome;
       const todos = itens; itens = [];
       if (todos.length) itens.push(espaco(4));

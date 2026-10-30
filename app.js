@@ -689,8 +689,8 @@ function evoForm(agId){
   d.innerHTML = `<div class="dlg"><h2>Evolução · ${esc(nome)}</h2>
     <p class="sub" style="margin:0">${fmtD(a.data)} · ${esc(a.fisio||'')}${e ? ` · salva por ${esc(e.fisio||'')} em ${fmtD((e.criadoEm||'').slice(0,10))}` : ''}</p>
     ${e ? '' : `<p class="sub" style="margin:0">Grave um áudio (o app tenta transcrever enquanto você fala), toque em "Falar" para só ditar, tire fotos ou escreva.</p>`}
-    <div class="lrow"><span class="sub" style="margin:0">Texto da evolução</span>${micBtn('evoTxt')}</div>
-    <textarea id="evoTxt" style="min-height:140px" placeholder="Texto opcional. Ex.: paciente acordado, saturação 94 em ar ambiente, fez ciclo ativo, tosse assistida com secreção clara...">${esc(e?.texto || '')}</textarea>
+    <div class="rtw" style="--rt-min:140px"><div class="lrow"><span class="sub" style="margin:0">Texto da evolução</span>${micBtn('evoTxt')}</div>
+    ${rtCampo('evoTxt', 'texto', e?.texto || '', 'Texto opcional. Ex.: paciente acordado, saturação 94 em ar ambiente, fez ciclo ativo, tosse assistida com secreção clara...')}</div>
     <div class="midbar">
       <label class="btn" for="evoFoto">Tirar foto</label><input id="evoFoto" type="file" accept="image/*" capture="environment" hidden>
       <span id="recBox"><button class="btn" type="button" data-act="rec-start">Gravar áudio</button></span>
@@ -710,7 +710,7 @@ async function carregarHist(pid, skip){
     const s = await db.collection('evolucoes').where('pid','==',pid).get();
     const L = s.docs.map(x => Object.assign({_id:x.id}, x.data())).filter(x => x._id !== skip && x.tipo !== 'avaliacao').sort((a,b) => (b.data||'').localeCompare(a.data||'')).slice(0, 5);
     const box = $('#evoHist') || $('#pacHist'); if (!box) return;
-    box.innerHTML = L.length ? `<div class="sec" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:700;margin:6px 0">Últimas evoluções</div>` + L.map(x => `<div style="border-top:1px solid var(--line);padding:8px 0;font-size:14px"><b>${fmtD(x.data)}</b> · ${esc(x.fisio||'')}<div style="white-space:pre-wrap;margin-top:4px">${esc(x.texto||'')}</div>${x.nFotos || x.nAudios ? `<div class="meta" style="margin-top:4px">${[x.nFotos ? x.nFotos+' foto'+(x.nFotos>1?'s':'') : '', x.nAudios ? x.nAudios+' áudio'+(x.nAudios>1?'s':'') : ''].filter(Boolean).join(' · ')} · <button class="btn sm ghost" data-act="evo-midias" data-id="${x._id}">Ver anexos</button></div>` : ''}<div id="hm-${x._id}" class="midias"></div></div>`).join('') : (box.id === 'pacHist' ? '<p class="sub">Nenhuma evolução registrada ainda.</p>' : '');
+    box.innerHTML = L.length ? `<div class="sec" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:700;margin:6px 0">Últimas evoluções</div>` + L.map(x => `<div style="border-top:1px solid var(--line);padding:8px 0;font-size:14px"><b>${fmtD(x.data)}</b> · ${esc(x.fisio||'')}<div style="margin-top:4px" class="rt-ver">${rtHtml(x.texto||'')}</div>${x.nFotos || x.nAudios ? `<div class="meta" style="margin-top:4px">${[x.nFotos ? x.nFotos+' foto'+(x.nFotos>1?'s':'') : '', x.nAudios ? x.nAudios+' áudio'+(x.nAudios>1?'s':'') : ''].filter(Boolean).join(' · ')} · <button class="btn sm ghost" data-act="evo-midias" data-id="${x._id}">Ver anexos</button></div>` : ''}<div id="hm-${x._id}" class="midias"></div></div>`).join('') : (box.id === 'pacHist' ? '<p class="sub">Nenhuma evolução registrada ainda.</p>' : '');
   } catch(e){}
 }
 function mostrarHistorico(pid){
@@ -719,7 +719,7 @@ function mostrarHistorico(pid){
   foot.parentNode.insertBefore(div, foot); carregarHist(pid, null);
 }
 async function evoSave(agId){
-  const a = S.agenda[agId], txt = $('#evoTxt').value.trim(), msg = $('#evoMsg');
+  const ed = $('#evoTxt'), a = S.agenda[agId], txt = ed && !rtVazio(ed) ? rtLimpar(ed.innerHTML) : '', msg = $('#evoMsg');
   const M = midiasAtuais.filter(m => m.evoId === agId);
   if (!txt && !M.length){ msg.hidden = false; msg.textContent = 'Escreva, grave um áudio ou tire uma foto antes de salvar.'; return; }
   const prev = S.evolucoes[agId];
@@ -775,7 +775,7 @@ async function gravarAudio(){
   let pico = 0, medir = null, actx = null;
   try { const AC = window.AudioContext || window.webkitAudioContext; actx = new AC(); const an = actx.createAnalyser(); actx.createMediaStreamSource(gravStream).connect(an);
     const buf = new Uint8Array(an.fftSize); medir = setInterval(() => { an.getByteTimeDomainData(buf); for (const x of buf) pico = Math.max(pico, Math.abs(x - 128)); }, 200); } catch(e){}
-  const txtAntes = $('#evoTxt')?.value || '';
+  const txtAntes = $('#evoTxt')?.textContent || '';
   const junto = store.get('ap.transcJunto') !== 'nao';
   gravador.onstop = () => {
     clearInterval(gravTimer); clearInterval(medir); gravStream.getTracks().forEach(t => t.stop()); try { actx && actx.close(); } catch(e){}
@@ -783,7 +783,7 @@ async function gravarAudio(){
     const mime = (gravador.mimeType || tipo || 'audio/webm').split(';')[0];
     const blob = new Blob(gravPartes, { type: mime }); gravador = null; botaoGravar(false);
     let aviso = '';
-    if (junto && medir && pico < 3 && ($('#evoTxt')?.value || '') !== txtAntes){
+    if (junto && medir && pico < 3 && ($('#evoTxt')?.textContent || '') !== txtAntes){
       store.set('ap.transcJunto', 'nao');
       aviso = 'Atenção: o áudio pode ter ficado sem som porque a transcrição usou o microfone. Ouça o áudio salvo. Neste celular, a gravação não vai mais transcrever junto; use "Falar" para ditar.';
     }
