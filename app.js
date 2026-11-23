@@ -19,7 +19,13 @@ function criarDb(sb){
     async set(obj){ const { error } = await sb.from('docs').upsert({ col: this.col, id: this.id, data: JSON.parse(JSON.stringify(obj)) }); if (error) throw erroDb(error); }
     async update(patch){ const atual = await this.get(); if (!atual.exists) throw { code: 'registro não encontrado' }; await this.set(Object.assign({}, atual.data(), patch)); }
     // excluir nunca apaga: o banco guarda uma cópia na lixeira e só depois tira da lista (pedidos de acesso são a exceção)
-    async delete(){ const { error } = this.col === 'pedidos' ? await sb.from('docs').delete().eq('col', this.col).eq('id', this.id) : await sb.rpc('mover_para_lixeira', { p_col: this.col, p_id: this.id }); if (error) throw erroDb(error); }
+    async delete(){
+      if (this.col !== 'pedidos'){
+        const { error } = await sb.rpc('mover_para_lixeira', { p_col: this.col, p_id: this.id });
+        // enquanto a atualização do banco (supabase/2-privacidade.sql) não roda, a função da lixeira não existe: exclui do jeito antigo
+        if (!error || !/PGRST202|Could not find the function|does not exist/i.test((error.code || '') + ' ' + (error.message || ''))){ if (error) throw erroDb(error); return; }
+      }
+      const { error } = await sb.from('docs').delete().eq('col', this.col).eq('id', this.id); if (error) throw erroDb(error); }
     onSnapshot(next, err){ let vivo = true; const run = () => this.get().then(s => vivo && next(s)).catch(e => err && err(e)); run(); const off = ouvir(this.col, run); return () => { vivo = false; off(); }; }
     collection(sub){ return new Col(this.path + '/' + sub); }
   }
