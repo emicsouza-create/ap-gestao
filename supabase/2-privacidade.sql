@@ -80,7 +80,7 @@ create policy docs_ler on public.docs for select to authenticated using (
     when col = 'pedidos' then public.is_admin() or id = auth.uid()::text
     when col = 'liberados' then public.is_admin() or id = auth.uid()::text
     when col = 'equipe' then true
-    when col in ('agenda', 'evolucoes', 'midias') then public.is_admin() or (public.is_member() and data ->> 'fisio' = public.minha_fisio())
+    when col in ('agenda', 'evolucoes', 'midias', 'grade') then public.is_admin() or (public.is_member() and data ->> 'fisio' = public.minha_fisio())
     when col = 'pacientes' then public.is_admin() or (public.is_member() and (data ->> 'fisio' = public.minha_fisio() or coalesce(data -> 'fisios', '[]'::jsonb) ? public.minha_fisio()))
     else public.is_member()
   end

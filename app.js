@@ -49,7 +49,7 @@ function baixar(nome, blob){
   const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000);
 }
 async function baixarBackup(){
-  const cols = ['pacientes','planos','cobrancas','agenda','evolucoes','midias','funil','equipe','equipamentos','datas','config','liberados','recados','lixeira'];
+  const cols = ['pacientes','planos','cobrancas','agenda','evolucoes','midias','funil','equipe','equipamentos','datas','config','liberados','recados','lixeira','grade'];
   const out = {};
   for (const c of cols){ try { const s = await db.collection(c).get(); out[c] = {}; s.docs.forEach(d => out[c][d.id] = d.data()); } catch(e){} }
   baixar(`backup-ap-gestao-${today()}.json`, new Blob([JSON.stringify({ formato: 'ap-gestao-backup-1', exportadoEm: today(), colecoes: out }, null, 1)], { type: 'application/json' }));
@@ -117,7 +117,7 @@ function pixPayload(cfg, valor){
 }
 
 // ---------- estado ----------
-const S = { recados:{}, pacientes:{}, planos:{}, cobrancas:{}, agenda:{}, funil:{}, equipe:{}, equipamentos:{}, datas:{}, config:{}, pedidos:{}, liberados:{}, perfis:{}, evolucoes:{}, loaded:{} };
+const S = { grade:{}, recados:{}, pacientes:{}, planos:{}, cobrancas:{}, agenda:{}, funil:{}, equipe:{}, equipamentos:{}, datas:{}, config:{}, pedidos:{}, liberados:{}, perfis:{}, evolucoes:{}, loaded:{} };
 let db = null, isAdmin = false, canWrite = true, modo = 'carregando', minhaFisio = '', myId = null, meuEmail = '', sb = null, pedidoFeito = false, iniciado = false;
 const restrito = () => modo === 'agenda';
 const MOTIVOS = ['Pedido da família','Paciente internado','Paciente doente ou indisponível','Fisio indisponível','Imprevisto (trânsito, clima)','Outro'];
@@ -223,21 +223,23 @@ const ICON = {
   cfg: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5"/></svg>'
 };
 
+ICON.evolucoes = ICON.avaliacoes; ICON.grade = ICON.agenda;
 // ---------- navegação ----------
 const TABS = [
   ['hoje','Hoje', false], ['agenda','Agenda', false], ['pacientes','Pacientes', false], ['avaliacoes','Avaliações', false], ['cobranca','Cobrança', true],
   ['entrada','Entrada', true], ['equipe','Equipe', false], ['painel','Avisos', true],
+  ['grade','Grade', false], ['evolucoes','Evoluções', false],
   ['sumindo','Quem está sumindo', true], ['relatorios','Relatórios', true], ['recados','Recados', true], ['privacidade','Privacidade', true]
 ];
 const BNAV_ADMIN = ['hoje','agenda','pacientes','cobranca','mais'];
-function tabsVisiveis(){ return restrito() ? TABS.filter(t => ['hoje','agenda','avaliacoes'].includes(t[0])) : TABS.filter(t => !t[2] || isAdmin); }
+function tabsVisiveis(){ return restrito() ? TABS.filter(t => ['hoje','agenda','grade','evolucoes','avaliacoes'].includes(t[0])) : TABS.filter(t => !t[2] || isAdmin); }
 const nomeTab = k => restrito() && k === 'agenda' ? 'Minha semana' : (TABS.find(t => t[0] === k) || [k, k])[1];
 function renderTabs(){
   if (modo !== 'total' && modo !== 'agenda'){ $('#tabs').innerHTML = ''; $('#bnav').innerHTML = ''; $('#bnav').hidden = true; return; }
   const nAlert = isAdmin ? alertas().filter(a => a[0]==='bad').length : 0;
   const badge = k => k === 'painel' && nAlert ? `<span class="badge">${nAlert}</span>` : '';
   $('#tabs').innerHTML = tabsVisiveis().map(([k]) => `<button data-tab="${k}" aria-current="${tab===k}">${nomeTab(k)}${badge(k)}</button>`).join('');
-  const itens = restrito() ? ['hoje','agenda','avaliacoes'] : BNAV_ADMIN.filter(k => k === 'mais' || tabsVisiveis().some(t => t[0] === k));
+  const itens = restrito() ? ['hoje','agenda','evolucoes','mais'] : BNAV_ADMIN.filter(k => k === 'mais' || tabsVisiveis().some(t => t[0] === k));
   const naMais = !restrito() && !['hoje','agenda','pacientes','cobranca'].includes(tab);
   $('#bnav').hidden = false;
   $('#bnav').innerHTML = itens.map(k => k === 'mais'
@@ -253,11 +255,11 @@ function fabHtml(){
   return '';
 }
 function render(){
-  if (!tab || (restrito() && !['hoje','agenda','avaliacoes'].includes(tab))) tab = 'hoje';
+  if (!tab || (restrito() && !['hoje','agenda','grade','evolucoes','avaliacoes'].includes(tab)) || (!isAdmin && (TABS.find(t => t[0] === tab) || [])[2])) tab = 'hoje';
   renderTabs();
   if (modo === 'pedido'){ if (!dlgOpen()) $('#view').innerHTML = vPedido(); return; }
   if (modo === 'carregando') return;
-  const f = {hoje:vHoje, painel:vPainel, pacientes:vPacientes, entrada:vEntrada, agenda:vAgenda, cobranca:vCobranca, equipe:vEquipe, avaliacoes: () => typeof vAvaliacoes === 'function' ? vAvaliacoes() : '<div class="empty">Carregando…</div>', sumindo: () => vSumindo(), relatorios: () => vRelatorios(), recados: () => vRecados(), privacidade: () => vPrivacidade()}[tab];
+  const f = {hoje:vHoje, painel:vPainel, pacientes:vPacientes, entrada:vEntrada, agenda:vAgenda, cobranca:vCobranca, equipe:vEquipe, avaliacoes: () => typeof vAvaliacoes === 'function' ? vAvaliacoes() : '<div class="empty">Carregando…</div>', grade: () => vGrade(), evolucoes: () => vEvolucoes(), sumindo: () => vSumindo(), relatorios: () => vRelatorios(), recados: () => vRecados(), privacidade: () => vPrivacidade()}[tab];
   if (dlgOpen()) return; // não redesenha enquanto um formulário está aberto
   $('#view').innerHTML = f() + fabHtml();
 }
@@ -281,9 +283,11 @@ function maisSheet(){
     isAdmin && {tab:'relatorios', act:'goto', icon:ICON.agenda, label:'Presença e relatórios', desc:'Frequência por paciente, dias cheios e vazios'},
     isAdmin && {tab:'recados', act:'goto', icon:ICON.entrada, label:'Recados para as famílias', desc:'Mensagem para todos ou por grupo'},
     isAdmin && {tab:'privacidade', act:'goto', icon:ICON.cfg, label:'Privacidade (LGPD)', desc:'Dados guardados, lixeira, registro e cópia de segurança'},
+    {tab:'grade', act:'goto', icon:ICON.agenda, label: restrito() ? 'Minha grade' : 'Grade da semana', desc:'Horários fixos de cada paciente'},
+    !restrito() && {tab:'evolucoes', act:'goto', icon:ICON.avaliacoes, label:'Evoluções', desc:'Evoluções dos últimos 30 dias'},
     {tab:'avaliacoes', act:'goto', icon:ICON.avaliacoes, label:'Avaliações', desc:'Ficha de avaliação com testes e PDF'},
     isAdmin && {tab:'entrada', act:'goto', icon:ICON.entrada, label:'Entrada de pacientes', desc:'Do primeiro contato até quem vai atender'},
-    {tab:'equipe', act:'goto', icon:ICON.equipe, label:'Equipe e equipamentos', desc: isAdmin ? 'Acessos ao app e cópia de segurança' : ''},
+    !restrito() && {tab:'equipe', act:'goto', icon:ICON.equipe, label:'Equipe e equipamentos', desc: isAdmin ? 'Acessos ao app e cópia de segurança' : ''},
     isAdmin && {act:'cfg', icon:ICON.cfg, label:'Dados de cobrança', desc:'Pix, multa, juros e WhatsApp da contabilidade'},
     {act:'sair', icon:ICON.sair, label:'Sair do app', cls:'bad'}
   ]);
@@ -894,6 +898,7 @@ document.addEventListener('click', async e => {
   if (a === 'copy-msg') return copy($('#msgTxt').textContent, 'Mensagem copiada');
   if (!db) return;
   if (a === 'ditar' || a.startsWith('av-')) return avAcao(a, id, b);
+  if (['grade-fisio','grade-novo','grade-edit','grade-del','grade-lancar','evo-filtro'].includes(a)) return gradeAcao(a, id, b);
   if (['sum-dias','sum-contato','rec-tipo','rec-preparar','rec-ok','priv-aba','reg-atualizar','lix-restaurar','backup','pac-dados','pac-aviso'].includes(a)) return gestaoAcao(a, id, b);
   try {
   switch(a){
@@ -1001,7 +1006,7 @@ document.addEventListener('click', async e => {
     case 'rec-start': return gravarAudio();
     case 'rec-stop': return pararGravacao();
     case 'backup-baixar': return baixarBackup();
-    case 'eq-new': case 'eq-edit': return openForm(id ? S.equipe[id].nome : 'Nova pessoa na equipe', [{k:'nome',l:'Nome',req:1,full:1},{k:'funcao',l:'Função',full:1},{k:'telefone',l:'WhatsApp',t:'tel'},{k:'atende',l:'Faz atendimentos (aparece na agenda)',t:'check'},{k:'ativo',l:'Ativa na equipe',t:'check'}], id ? S.equipe[id] : {atende:true, ativo:true}, d => (id ? db.doc('equipe/'+id) : db.collection('equipe').doc()).set(d), id ? [['Excluir','eq-del',id]] : []);
+    case 'eq-new': case 'eq-edit': return openForm(id ? S.equipe[id].nome : 'Nova pessoa na equipe', [{k:'nome',l:'Nome',req:1,full:1},{k:'funcao',l:'Função',full:1},{k:'telefone',l:'WhatsApp',t:'tel'},{k:'atende',l:'Faz atendimentos (aparece na agenda)',t:'check'},{k:'vagasDia',l:'Vagas por dia (quantos atendimentos cabem)',t:'number'},{k:'ativo',l:'Ativa na equipe',t:'check'}], id ? S.equipe[id] : {atende:true, ativo:true}, d => (id ? db.doc('equipe/'+id) : db.collection('equipe').doc()).set(d), id ? [['Excluir','eq-del',id]] : []);
     case 'eq-del': return confirmBox('Excluir esta pessoa da equipe?', () => db.doc('equipe/'+id).delete());
     case 'eqp-new': case 'eqp-edit': return openForm(id ? S.equipamentos[id].nome : 'Novo equipamento', [{k:'nome',l:'Equipamento',req:1,full:1},{k:'local',l:'Onde está (sede ou paciente)',full:1},{k:'ultima',l:'Última manutenção',t:'date'},{k:'proxima',l:'Próxima manutenção',t:'date'},{k:'obs',l:'Observação',full:1}], id ? S.equipamentos[id] : {}, d => (id ? db.doc('equipamentos/'+id) : db.collection('equipamentos').doc()).set(d), id ? [['Excluir','eqp-del',id]] : []);
     case 'eqp-del': return confirmBox('Excluir este equipamento?', () => db.doc('equipamentos/'+id).delete());
@@ -1045,7 +1050,7 @@ async function iniciarApp(){
     if (iniciado) return; iniciado = true;
     sub('agenda', db.collection('agenda').where('data', '>=', addDays(today(), -120)));
     sub('evolucoes', db.collection('evolucoes').where('data', '>=', addDays(today(), -30)));
-    sub('datas');
+    sub('datas'); sub('grade');
     if (restrito()) return;
     sub('pacientes'); sub('equipamentos');
     if (isAdmin){
