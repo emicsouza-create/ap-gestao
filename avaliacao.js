@@ -248,6 +248,7 @@ function avSecao(n, titulo, corpo, cls){
 function avForm(id, base){
   pararDitado(); clearTimeout(avT);
   avAtual = id ? JSON.parse(JSON.stringify(avLista.find(x => x._id === id) || {})) : Object.assign({ status: 'rascunho', av: {} }, base || {});
+  if (id) registrarAcesso('evolucoes', id, avAtual.pnome || '');
   if (!avAtual.av) avAtual.av = {};
   if (!id && !avAtual.av.quando) avAtual.av.quando = today() + 'T' + new Date().toTimeString().slice(0, 5);
   avNascCadastro(avAtual.av);
@@ -391,7 +392,7 @@ async function avAcao(a, id, b){
   if (a === 'av-salvar') return avSalvar(false);
   if (a === 'av-final') return avSalvar(true);
   if (a === 'av-pdf'){ const x = (avLista || []).find(y => y._id === id); if (x) gerarPdfAvaliacao(x); return; }
-  if (a === 'av-del') return confirmBox('Excluir esta avaliação? Não dá para desfazer.', async () => { await db.doc('evolucoes/' + id).delete(); avLista = (avLista || []).filter(y => y._id !== id); toast('Avaliação excluída'); });
+  if (a === 'av-del') return confirmBox('Excluir esta avaliação? Ela vai para a lixeira (dá para restaurar em Privacidade).', async () => { await db.doc('evolucoes/' + id).delete(); avLista = (avLista || []).filter(y => y._id !== id); toast('Avaliação excluída'); });
   if (a === 'av-ag'){ // abre a avaliação ligada a um horário de avaliação da agenda
     const ag = S.agenda[id]; if (!ag) return;
     if (!avLista){ toast('Carregando avaliações…'); await carregarAvaliacoes(); }

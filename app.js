@@ -18,7 +18,8 @@ function criarDb(sb){
     async get(){ const { data, error } = await sb.from('docs').select('data').eq('col', this.col).eq('id', this.id).maybeSingle(); if (error) throw erroDb(error); return snapDoc(this.id, data ? data.data : undefined); }
     async set(obj){ const { error } = await sb.from('docs').upsert({ col: this.col, id: this.id, data: JSON.parse(JSON.stringify(obj)) }); if (error) throw erroDb(error); }
     async update(patch){ const atual = await this.get(); if (!atual.exists) throw { code: 'registro não encontrado' }; await this.set(Object.assign({}, atual.data(), patch)); }
-    async delete(){ const { error } = await sb.from('docs').delete().eq('col', this.col).eq('id', this.id); if (error) throw erroDb(error); }
+    // excluir nunca apaga: o banco guarda uma cópia na lixeira e só depois tira da lista (pedidos de acesso são a exceção)
+    async delete(){ const { error } = this.col === 'pedidos' ? await sb.from('docs').delete().eq('col', this.col).eq('id', this.id) : await sb.rpc('mover_para_lixeira', { p_col: this.col, p_id: this.id }); if (error) throw erroDb(error); }
     onSnapshot(next, err){ let vivo = true; const run = () => this.get().then(s => vivo && next(s)).catch(e => err && err(e)); run(); const off = ouvir(this.col, run); return () => { vivo = false; off(); }; }
     collection(sub){ return new Col(this.path + '/' + sub); }
   }
@@ -48,7 +49,7 @@ function baixar(nome, blob){
   const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000);
 }
 async function baixarBackup(){
-  const cols = ['pacientes','planos','cobrancas','agenda','evolucoes','midias','funil','equipe','equipamentos','datas','config','liberados'];
+  const cols = ['pacientes','planos','cobrancas','agenda','evolucoes','midias','funil','equipe','equipamentos','datas','config','liberados','recados','lixeira'];
   const out = {};
   for (const c of cols){ try { const s = await db.collection(c).get(); out[c] = {}; s.docs.forEach(d => out[c][d.id] = d.data()); } catch(e){} }
   baixar(`backup-ap-gestao-${today()}.json`, new Blob([JSON.stringify({ formato: 'ap-gestao-backup-1', exportadoEm: today(), colecoes: out }, null, 1)], { type: 'application/json' }));
@@ -116,7 +117,7 @@ function pixPayload(cfg, valor){
 }
 
 // ---------- estado ----------
-const S = { pacientes:{}, planos:{}, cobrancas:{}, agenda:{}, funil:{}, equipe:{}, equipamentos:{}, datas:{}, config:{}, pedidos:{}, liberados:{}, perfis:{}, evolucoes:{}, loaded:{} };
+const S = { recados:{}, pacientes:{}, planos:{}, cobrancas:{}, agenda:{}, funil:{}, equipe:{}, equipamentos:{}, datas:{}, config:{}, pedidos:{}, liberados:{}, perfis:{}, evolucoes:{}, loaded:{} };
 let db = null, isAdmin = false, canWrite = true, modo = 'carregando', minhaFisio = '', myId = null, meuEmail = '', sb = null, pedidoFeito = false, iniciado = false;
 const restrito = () => modo === 'agenda';
 const MOTIVOS = ['Pedido da família','Paciente internado','Paciente doente ou indisponível','Fisio indisponível','Imprevisto (trânsito, clima)','Outro'];
@@ -225,7 +226,8 @@ const ICON = {
 // ---------- navegação ----------
 const TABS = [
   ['hoje','Hoje', false], ['agenda','Agenda', false], ['pacientes','Pacientes', false], ['avaliacoes','Avaliações', false], ['cobranca','Cobrança', true],
-  ['entrada','Entrada', true], ['equipe','Equipe', false], ['painel','Avisos', true]
+  ['entrada','Entrada', true], ['equipe','Equipe', false], ['painel','Avisos', true],
+  ['sumindo','Quem está sumindo', true], ['relatorios','Relatórios', true], ['recados','Recados', true], ['privacidade','Privacidade', true]
 ];
 const BNAV_ADMIN = ['hoje','agenda','pacientes','cobranca','mais'];
 function tabsVisiveis(){ return restrito() ? TABS.filter(t => ['hoje','agenda','avaliacoes'].includes(t[0])) : TABS.filter(t => !t[2] || isAdmin); }
@@ -255,7 +257,7 @@ function render(){
   renderTabs();
   if (modo === 'pedido'){ if (!dlgOpen()) $('#view').innerHTML = vPedido(); return; }
   if (modo === 'carregando') return;
-  const f = {hoje:vHoje, painel:vPainel, pacientes:vPacientes, entrada:vEntrada, agenda:vAgenda, cobranca:vCobranca, equipe:vEquipe, avaliacoes: () => typeof vAvaliacoes === 'function' ? vAvaliacoes() : '<div class="empty">Carregando…</div>'}[tab];
+  const f = {hoje:vHoje, painel:vPainel, pacientes:vPacientes, entrada:vEntrada, agenda:vAgenda, cobranca:vCobranca, equipe:vEquipe, avaliacoes: () => typeof vAvaliacoes === 'function' ? vAvaliacoes() : '<div class="empty">Carregando…</div>', sumindo: () => vSumindo(), relatorios: () => vRelatorios(), recados: () => vRecados(), privacidade: () => vPrivacidade()}[tab];
   if (dlgOpen()) return; // não redesenha enquanto um formulário está aberto
   $('#view').innerHTML = f() + fabHtml();
 }
@@ -274,7 +276,11 @@ function sheet(titulo, sub, opcoes){
 function maisSheet(){
   const nAlert = isAdmin ? alertas().filter(a => a[0]==='bad').length : 0;
   sheet('Mais', meuEmail, [
+    isAdmin && {tab:'sumindo', act:'goto', icon:ICON.painel, label:'Quem está sumindo' + (listaSumindo(14).length ? ` (${listaSumindo(14).length})` : ''), desc:'Pacientes sem atendimento há dias, com o valor em risco'},
     isAdmin && {tab:'painel', act:'goto', icon:ICON.painel, label:'Avisos' + (nAlert ? ` (${nAlert} urgentes)` : ''), desc:'Atrasos, pedidos de acesso e pendências'},
+    isAdmin && {tab:'relatorios', act:'goto', icon:ICON.agenda, label:'Presença e relatórios', desc:'Frequência por paciente, dias cheios e vazios'},
+    isAdmin && {tab:'recados', act:'goto', icon:ICON.entrada, label:'Recados para as famílias', desc:'Mensagem para todos ou por grupo'},
+    isAdmin && {tab:'privacidade', act:'goto', icon:ICON.cfg, label:'Privacidade (LGPD)', desc:'Dados guardados, lixeira, registro e cópia de segurança'},
     {tab:'avaliacoes', act:'goto', icon:ICON.avaliacoes, label:'Avaliações', desc:'Ficha de avaliação com testes e PDF'},
     isAdmin && {tab:'entrada', act:'goto', icon:ICON.entrada, label:'Entrada de pacientes', desc:'Do primeiro contato até quem vai atender'},
     {tab:'equipe', act:'goto', icon:ICON.equipe, label:'Equipe e equipamentos', desc: isAdmin ? 'Acessos ao app e cópia de segurança' : ''},
@@ -309,6 +315,7 @@ function vHoje(){
     ${d !== t ? '<button class="btn sm" data-act="dia" data-n="0">Hoje</button>' : ''}
     <button class="ibtn" data-act="dia" data-n="1" aria-label="Próximo dia">${ICON.right}</button>
   </div>
+  ${isAdmin && d === t && typeof listaSumindo === 'function' && listaSumindo(14).length ? `<div class="cta" style="background:var(--bad-soft)"><div class="tx">${listaSumindo(14).length} pacientes sem atendimento há 14 dias ou mais · ${brl(listaSumindo(14).reduce((s, x) => s + x.valor, 0))} por mês em risco</div><button class="btn sm" data-tab="sumindo">Ver quem é</button></div>` : ''}
   ${f ? `<div class="cta warnbox"><div class="tx">${esc(f.tipo==='ferias'?'Férias coletivas':'Feriado')}${f.desc?': '+esc(f.desc):''}. Sem atendimento.</div></div>`:''}
   ${nomes.length ? `<div class="grid g2">${nomes.map(n => { const M = L.filter(a => (a.fisio||'') === n).sort(agSort);
       const at = M.filter(a => a.tipo !== 'outro'), fe = at.filter(a => a.status && a.status !== 'agendado').length;
@@ -552,9 +559,12 @@ function pacFields(){
     {k:'statusDesde',l:'Situação desde',t:'date'},
     {k:'medico',l:'Médico que indicou'},{k:'inicio',l:'Início do contrato',t:'date'},
     {k:'emergencia',l:'Contato de emergência',full:1},
-    {k:'imagem',l:'Uso de imagem',t:'select',o:[['pendente','Pendente'],['autorizado','Autorizado'],['nao','Não autorizado']]},
     {k:'contrato',l:'Contrato assinado',t:'check'},{k:'exclusivo',l:'Atendimento exclusivo da Ana',t:'check'},
-    {k:'obs',l:'Observações da família e do caso (sem dados clínicos detalhados)',t:'textarea',full:1}
+    {k:'obs',l:'Observações da família e do caso (sem dados clínicos detalhados)',t:'textarea',full:1},
+    {sec:'Privacidade'},
+    {k:'privAvisoEm',l:'Família recebeu o aviso de privacidade em',t:'date'},
+    {k:'imagem',l:'Permissão: usar foto ou vídeo nas redes sociais da AP',t:'select',o:[['pendente','Ainda não perguntado'],['autorizado','Sim, autorizou'],['nao','Não autorizou']]},
+    {k:'conteudos',l:'Permissão: receber dicas e conteúdos pelo WhatsApp',t:'select',o:[['pendente','Ainda não perguntado'],['sim','Sim'],['nao','Não']]}
   ];
   if (isAdmin) f.push({sec:'Pacote e cobrança (só Emi e Ana veem)'},
     {k:'pl_valor',l:'Valor mensal (R$)',t:'number'},{k:'pl_pagador',l:'Quem paga (nome no Pix/boleto)'},
@@ -581,8 +591,8 @@ function pacForm(id){
     if (isAdmin) await db.doc('planos/'+pid).set(Object.assign({}, id ? stripId(S.planos[id] || {}) : {}, pld));
     if (!id && isAdmin && gerarContrato(pid, final, pld)) setTimeout(() => toast('Paciente salvo. Contrato em PDF baixado.'), 300);
     return pid;
-  }, id && canWrite ? [isAdmin && ['Gerar contrato (PDF)','pac-contrato',id], [p.status === 'inativo' ? 'Reativar paciente' : 'Inativar paciente', 'pac-inat', id], ['Excluir','pac-del',id]].filter(Boolean) : []);
-  if (id) mostrarHistorico(id);
+  }, id && canWrite ? [isAdmin && ['Gerar contrato (PDF)','pac-contrato',id], isAdmin && ['Enviar aviso de privacidade','pac-aviso',id], isAdmin && ['Baixar os dados (pedido da família)','pac-dados',id], [p.status === 'inativo' ? 'Reativar paciente' : 'Inativar paciente', 'pac-inat', id], ['Excluir','pac-del',id]].filter(Boolean) : []);
+  if (id){ mostrarHistorico(id); registrarAcesso('pacientes', id, p.nome); }
 }
 const stripId = o => { const c = Object.assign({}, o); delete c._id; return c; };
 
@@ -825,7 +835,7 @@ async function carregarMidias(evoId, alvo){
 }
 async function apagarMidia(mid){
   const m = midiasAtuais.find(x => x._id === mid); if (!m) return;
-  await sb.storage.from('midias').remove([m.path]);
+  // o arquivo continua guardado; só o registro vai para a lixeira
   await db.doc('midias/' + mid).delete();
   delete urlsMidia[mid];
   carregarMidias(evoAg);
@@ -884,6 +894,7 @@ document.addEventListener('click', async e => {
   if (a === 'copy-msg') return copy($('#msgTxt').textContent, 'Mensagem copiada');
   if (!db) return;
   if (a === 'ditar' || a.startsWith('av-')) return avAcao(a, id, b);
+  if (['sum-dias','sum-contato','rec-tipo','rec-preparar','rec-ok','priv-aba','reg-atualizar','lix-restaurar','backup','pac-dados','pac-aviso'].includes(a)) return gestaoAcao(a, id, b);
   try {
   switch(a){
     case 'pac-new': return pacForm(null);
@@ -894,7 +905,7 @@ document.addEventListener('click', async e => {
     case 'evo-save': return evoSave(id);
     case 'midia-del': { const ok = b.dataset.ok; if (!ok){ b.dataset.ok = '1'; b.textContent = 'Toque de novo para apagar'; return; } return apagarMidia(id); }
     case 'evo-midias': { b.remove(); return carregarMidias(id, document.getElementById('hm-' + id)); }
-    case 'pac-del': return confirmBox(`Excluir ${pacNome(id)}? Prefira mudar a situação para "Alta" se quiser manter o histórico.`, async () => { await db.doc('pacientes/'+id).delete(); if (isAdmin) await db.doc('planos/'+id).delete(); });
+    case 'pac-del': return confirmBox(`Excluir ${pacNome(id)}? Ele sai das telas e vai para a lixeira (dá para restaurar em Privacidade). Se o tratamento acabou, prefira mudar a situação para "Alta".`, async () => { await db.doc('pacientes/'+id).delete(); if (isAdmin) await db.doc('planos/'+id).delete(); });
     case 'fun-new': return openForm('Novo contato', funFields(), {etapa:'indicacao', origem:'medico', data: today()}, async d => { await db.collection('funil').doc().set(d); });
     case 'fun-edit': return openForm(S.funil[id].nome, funFields(), S.funil[id], async d => { await db.doc('funil/'+id).set(Object.assign(stripId(S.funil[id]), d)); }, [['Excluir','fun-del',id]]);
     case 'fun-del': return confirmBox('Excluir este contato da entrada?', () => db.doc('funil/'+id).delete());
@@ -1039,7 +1050,7 @@ async function iniciarApp(){
     sub('pacientes'); sub('equipamentos');
     if (isAdmin){
       sub('planos'); sub('cobrancas', db.collection('cobrancas').where('mes', '>=', addDays(today(), -400).slice(0,7))); sub('funil');
-      sub('pedidos'); sub('liberados');
+      sub('pedidos'); sub('liberados'); sub('recados');
       db.doc('config/geral').onSnapshot(s => { S.config = s.exists ? s.data() : {}; schedule(); }, () => {});
     }
   };
