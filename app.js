@@ -152,7 +152,7 @@ const ETAPAS = [
   ['contrato','Contrato enviado'],['avaliacao_marcada','Avaliação marcada'],['avaliacao_feita','Avaliação feita'],
   ['definir','Ana define quem atende'],['perdido','Não fechou']
 ];
-const STATUS_PAC = {ativo:['Ativo','ok'], internado:['Internado','bad'], pausado:['Pausado','warn'], alta:['Alta / encerrado','mute'], inativo:['Inativo','mute'], verificar:['Conferir cadastro','info']};
+const STATUS_PAC = {ativo:['Ativo','ok'], internado:['Internado','bad'], pausado:['Pausado','warn'], alta:['Alta / encerrado','mute'], avaliacao:['Só avaliação','info'], inativo:['Inativo','mute'], verificar:['Conferir cadastro','info']};
 const STATUS_AG = {agendado:['Agendado','mute'], feito:['Realizado','ok'], falta:['Falta (cobrada)','bad'], remarcado:['Remarcado','info'], cancelado:['Não aconteceu (sem cobrança)','warn']};
 
 const pacFisios = p => (p && Array.isArray(p.fisios) && p.fisios.length) ? p.fisios : (p && p.fisio ? [p.fisio] : []);
@@ -357,7 +357,7 @@ const TICK = {feito: ICON.check, falta: ICON.x, remarcado: ICON.redo, cancelado:
 function agRow(a, mostrarFisio){
   const s = STATUS_AG[a.status] ? a.status : 'agendado', st = STATUS_AG[s], p = S.pacientes[a.pid];
   const outro = a.tipo === 'outro', conf = !a.pid && !outro && a.tipo !== 'avaliacao', evo = S.evolucoes[a._id];
-  const meta = [mostrarFisio && a.fisio ? a.fisio.split(' ')[0] : '', a.tipo === 'avaliacao' ? 'Avaliação' : '', outro ? 'Compromisso' : '', s !== 'agendado' ? st[0] : '',
+  const meta = [mostrarFisio && a.fisio ? a.fisio.split(' ')[0] : '', a.tipo === 'avaliacao' ? (a.soAvaliacao ? 'Só avaliação' : 'Avaliação') : '', outro ? 'Compromisso' : '', s !== 'agendado' ? st[0] : '',
     p?.status === 'internado' ? 'Paciente internado' : '', conf ? 'Confirmar paciente' : '', evo ? 'Evolução registrada' : '', a.obs || ''].filter(Boolean).join(' · ');
   const tick = outro ? `<span class="tick hora">${esc(a.hora || '')}</span>`
     : canWrite && s === 'agendado' ? `<button class="tick" data-act="ag-feito" data-id="${esc(a._id)}" aria-label="Marcar ${esc(p?.nome || a.pnome || '')} como realizado"></button>`
@@ -370,6 +370,7 @@ function agSheet(id){
   const outro = a.tipo === 'outro', evo = S.evolucoes[id];
   sheet(p.nome || a.pnome || 'Atendimento', [fmtD(a.data), a.hora, a.fisio, s !== 'agendado' ? STATUS_AG[s][0] : ''].filter(Boolean).join(' · '), [
     canWrite && !outro && s === 'agendado' && {act:'ag-feito', id, icon:ICON.check, label:'Marcar como realizado', cls:'pri'},
+    canWrite && !outro && s === 'agendado' && a.pid && {act:'ag-soav', id, icon:ICON.avaliacoes, label:'Fez só a avaliação', desc:'Realizado como avaliação; o paciente não seguiu com o tratamento'},
     canWrite && a.tipo === 'avaliacao' && {act:'av-ag', id, icon:ICON.avaliacoes, label:'Fazer avaliação', desc:'Abre a ficha de avaliação deste paciente', cls: s === 'agendado' ? 'pri' : ''},
     canWrite && !outro && {act:'evo', id, icon:ICON.mic, label: evo ? 'Ver evolução' : 'Evoluir', desc:'Áudio, foto ou texto'},
     canWrite && !outro && s === 'agendado' && {act:'ag-rem', id, icon:ICON.redo, label:'Não aconteceu ou remarcar', desc:'Motivo, aviso de 6 horas e nova data'},
@@ -414,12 +415,13 @@ function vPacientes(){
     ativos: p => ['ativo','internado','verificar'].includes(p.status),
     atencao: p => ['ativo','internado','verificar'].includes(p.status) && precisaAtencao(p),
     inativos: p => ['inativo','alta','pausado'].includes(p.status),
+    avaliacao: p => p.status === 'avaliacao',
     todos: () => true };
   if (!grupos[pacFiltro]) pacFiltro = 'ativos';
   let L = todos.filter(grupos[pacFiltro]);
   if (pacBusca) { const q = noAccent(pacBusca).toLowerCase(); L = L.filter(p => noAccent(p.nome + ' ' + (p.responsavel||'') + ' ' + (p.medico||'')).toLowerCase().includes(q)); }
   L.sort((a,b) => a.nome.localeCompare(b.nome));
-  const rot = {ativos:'Ativos', atencao:'Precisam de atenção', inativos:'Inativos e alta', todos:'Todos'};
+  const rot = {ativos:'Ativos', atencao:'Precisam de atenção', inativos:'Inativos e alta', avaliacao:'Só avaliação', todos:'Todos'};
   return `
   <div class="head"><div><h1>Pacientes</h1></div></div>
   <input id="pacBusca" class="search" type="search" placeholder="Buscar por paciente, responsável ou médico" value="${esc(pacBusca)}" autocomplete="off">
@@ -980,6 +982,13 @@ document.addEventListener('click', async e => {
     case 'wk': agWeek = b.dataset.n === '0' ? weekStart(today()) : addDays(agWeek, Number(b.dataset.n)); return schedule();
     case 'ag-new': return agForm(null);
     case 'ag-edit': return agForm(id);
+    case 'ag-soav': { const a0 = S.agenda[id]; if (!a0) return; const nome = S.pacientes[a0.pid]?.nome || a0.pnome || 'o paciente';
+      const muda = isAdmin && S.pacientes[a0.pid];
+      return confirmBox(`${nome} fez só a avaliação? O horário fica como realizado (avaliação). ${muda ? 'No cadastro, a situação muda para "Só avaliação": sai da cobrança mensal, da grade e da lista de quem está sumindo.' : 'A Ana ou a Emi mudam a situação no cadastro.'}`, async () => {
+        await db.doc('agenda/'+id).update({status:'feito', tipo:'avaliacao', soAvaliacao:true, tipoAntes:a0.tipo || 'atendimento', statusPacAntes: muda ? (S.pacientes[a0.pid].status || 'ativo') : '', feitoEm:new Date().toISOString()});
+        if (muda) await db.doc('pacientes/'+a0.pid).update({status:'avaliacao', soAvaliacaoEm:a0.data});
+        if (dlgOpen()) $('#dlg').close();
+        toast(nome.split(' ')[0] + ' · só avaliação'); }); }
     case 'ag-feito': { if (dlgOpen()) $('#dlg').close(); const ant = S.agenda[id]?.status || 'agendado'; if (S.agenda[id]) { S.agenda[id].status = 'feito'; schedule(); }
       // se não salvar, desfaz na tela e avisa (antes ficava "realizado" só na tela)
       try { await db.doc('agenda/'+id).update({status:'feito', feitoEm: new Date().toISOString()}); }
@@ -1010,7 +1019,10 @@ document.addEventListener('click', async e => {
       const rp = rid && S.agenda[rid];
       if (rp && (rp.status || 'agendado') !== 'agendado') return toast('A reposição desta sessão já foi marcada. Ajuste as duas na agenda.');
       if (rid) await db.doc('agenda/'+rid).delete();
-      await db.doc('agenda/'+id).update({status:'agendado', obs:'', motivo:'', detalhe:'', aviso:'', novaData:'', novaHora:'', reposicaoId:'', feitoEm:'', alteradoEm:new Date().toISOString()});
+      // desfazer "só avaliação": volta o tipo do horário e a situação do paciente
+      const extra = a0.soAvaliacao ? {tipo:a0.tipoAntes || 'atendimento', soAvaliacao:false, tipoAntes:'', statusPacAntes:''} : {};
+      if (a0.soAvaliacao && isAdmin && a0.statusPacAntes && S.pacientes[a0.pid]?.status === 'avaliacao') await db.doc('pacientes/'+a0.pid).update({status:a0.statusPacAntes, soAvaliacaoEm:''});
+      await db.doc('agenda/'+id).update(Object.assign({status:'agendado', obs:'', motivo:'', detalhe:'', aviso:'', novaData:'', novaHora:'', reposicaoId:'', feitoEm:'', alteradoEm:new Date().toISOString()}, extra));
       return toast(rid ? 'Voltou para agendado. A reposição foi para a lixeira.' : 'Voltou para agendado'); }
     case 'ag-rem': { const a0 = S.agenda[id];
       openForm((a0.pnome || pacNome(a0.pid)) + ' · ' + fmtD(a0.data), [
