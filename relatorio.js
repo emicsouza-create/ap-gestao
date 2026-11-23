@@ -61,6 +61,11 @@ function gerarPdfAvaliacao(x){
     [['normal', 'NotoSans-Regular.ttf'], ['bold', 'NotoSans-Bold.ttf'], ['italic', 'NotoSans-Italic.ttf']].forEach(([st, arq]) => { doc.addFileToVFS(arq, FONTES_AP[st]); doc.addFont(arq, 'NotoSans', st); });
     FN = 'NotoSans';
   } catch(e){ FN = 'helvetica'; }
+  // símbolos que a fonte do PDF não tem viram equivalentes que ela tem (senão somem do relatório)
+  const TROCA = { '≥': '>=', '≤': '<=', '→': '->', '←': '<-', '↑': '(subiu)', '↓': '(desceu)', '✓': 'ok', '✔': 'ok', '✗': 'x', '✘': 'x', '€': 'EUR', '\u2009': ' ', '\u00a0': ' ' };
+  if (FN === 'helvetica') Object.assign(TROCA, { '−': '-', '–': '-', '—': '-', '“': '"', '”': '"', '‘': "'", '’': "'", '…': '...', '•': '-' });
+  const RX = new RegExp('[' + Object.keys(TROCA).join('') + ']', 'g'), troca = t => typeof t === 'string' ? t.replace(RX, c => TROCA[c]) : Array.isArray(t) ? t.map(troca) : t;
+  ['text', 'getTextWidth', 'splitTextToSize'].forEach(m => { const o = doc[m].bind(doc); doc[m] = (t, ...r) => o(troca(t), ...r); });
   const fonte = (s, b, cor, it) => { doc.setFont(FN, b ? 'bold' : it ? 'italic' : 'normal'); doc.setFontSize(s); doc.setTextColor(...(cor || C.tx)); };
   const novaPagina = () => { doc.addPage(); y = TOP; };
   const dataAv = v.quando ? fmtD(v.quando.slice(0, 10)) : fmtD(x.data);
@@ -70,15 +75,18 @@ function gerarPdfAvaliacao(x){
 
   // ----- itens que vão dentro dos cartões: cada um sabe medir a própria altura e se desenhar -----
   const paragrafo = (txt, { s = 8.6, it = false, b = false, cor, larg = IW } = {}) => {
-    fonte(s, b, cor, it); const L = doc.splitTextToSize(String(txt), larg);
-    return { h: L.length * lh(s) + 1, draw: (x0, y0) => { fonte(s, b, cor, it); L.forEach((l, i) => doc.text(l, x0, y0 + lh(s) * (i + 0.8), i < L.length - 1 && L.length > 1 ? { maxWidth: larg, align: 'justify' } : {})); } };
+    fonte(s, b, cor, it); const T = doc.splitTextToSize(String(txt), larg);
+    const fazer = L => ({ h: L.length * lh(s) + 1, draw: (x0, y0) => { fonte(s, b, cor, it); L.forEach((l, i) => doc.text(l, x0, y0 + lh(s) * (i + 0.8), i < L.length - 1 && L.length > 1 ? { maxWidth: larg, align: 'justify' } : {})); },
+      // texto maior que uma página é dividido em pedaços (nada fica cortado no fim da folha)
+      partes: maxH => { const n = Math.max(1, Math.floor((maxH - 1) / lh(s))), P = []; for (let i = 0; i < L.length; i += n) P.push(fazer(L.slice(i, i + n))); return P; } });
+    return fazer(T);
   };
   // texto formatado (negrito, itálico, tamanho, alinhamento, citação, lista)
   const rico = (valor, { s = 8.6, larg: LW = IW } = {}) => {
     if (!rtTemHtml(valor)) return paragrafo(valor, { s, larg: LW });
     const TAM = { 1: 0.75, 2: 0.88, 3: 1, 4: 1.15, 5: 1.32, 6: 1.55, 7: 1.8 }, linhas = [];
     rtBlocos(valor).forEach((B, bi) => {
-      const ind = (B.citacao ? 6 : 0) + (B.lista ? 5 : 0), larg = LW - ind - (B.citacao ? 2 : 0);
+      const ind = (B.citacao ? 6 : 0) + (B.lista ? 5 + 5 * (B.nivel || 0) : 0), larg = LW - ind - (B.citacao ? 2 : 0);
       // palavras com a fonte de cada trecho; '\n' força quebra
       const pal = []; B.trechos.forEach(t => { const sz = s * (TAM[t.tam] || 1), fo = { b: t.b, i: t.i || B.citacao, u: t.u, sz };
         t.t.split(/(\n| )/).forEach(w => { if (w === '\n') pal.push({ br: true }); else if (w === ' ') pal.push({ esp: true, fo }); else if (w) pal.push({ w, fo }); }); });
@@ -86,7 +94,8 @@ function gerarPdfAvaliacao(x){
       let lin = { itens: [], w: 0, alt: 0 }, primeira = true;
       const fecha = (ultima) => { while (lin.itens.length && lin.itens[lin.itens.length - 1].esp){ lin.w -= lin.itens[lin.itens.length - 1].lw; lin.itens.pop(); }
         linhas.push(Object.assign(lin, { B, ind, larg, ultima, marcador: primeira && B.lista, alt: Math.max(lin.alt, lh(s)) })); primeira = false; lin = { itens: [], w: 0, alt: 0 }; };
-      pal.forEach(x => {
+      const pal2 = []; pal.forEach(x => { if (x.w && larguraDe(x) > larg){ let r = ''; for (const ch of x.w){ if (larguraDe({ w: r + ch, fo: x.fo }) > larg && r){ pal2.push({ w: r, fo: x.fo }); r = ''; } r += ch; } if (r) pal2.push({ w: r, fo: x.fo }); } else pal2.push(x); });
+      pal2.forEach(x => {
         if (x.br){ fecha(true); return; }
         const lw = larguraDe(x); if (x.esp && !lin.itens.length) return;
         if (!x.esp && lin.w + lw > larg && lin.itens.length) fecha(false);
@@ -95,10 +104,10 @@ function gerarPdfAvaliacao(x){
       });
       fecha(true); linhas[linhas.length - 1].fimBloco = true;
     });
-    const h = linhas.reduce((a, l) => a + l.alt + (l.fimBloco ? 1.6 : 0), 0) + 1;
-    return { h, draw: (x0, y0) => {
+    // palavra mais larga que a linha é quebrada em pedaços
+    const fazer = LS => ({ h: LS.reduce((a, l) => a + l.alt + (l.fimBloco ? 1.6 : 0), 0) + 1, draw: (x0, y0) => {
       let yy = y0;
-      linhas.forEach(l => {
+      LS.forEach(l => {
         const B = l.B, sobra = l.larg - l.w, nEsp = l.itens.filter(i => i.esp).length;
         let xx = x0 + l.ind, extra = 0;
         if (B.alinha === 'center') xx += sobra / 2; else if (B.alinha === 'right') xx += sobra; else if ((B.alinha === 'justify' || !B.alinha) && !l.ultima && nEsp) extra = sobra / nEsp; // sem alinhamento escolhido: justificado, como no modelo
@@ -113,19 +122,24 @@ function gerarPdfAvaliacao(x){
         });
         yy += l.alt + (l.fimBloco ? 1.6 : 0);
       });
-    } };
+    }, partes: maxH => { const P = []; let cur = [], hh = 1; LS.forEach(l => { const a = l.alt + (l.fimBloco ? 1.6 : 0); if (cur.length && hh + a > maxH){ P.push(fazer(cur)); cur = []; hh = 1; } cur.push(l); hh += a; }); if (cur.length) P.push(fazer(cur)); return P; } });
+    return fazer(linhas);
   };
   const sub = (rot, txt) => {
     const p = rico(txt);
-    return { h: 8 + p.h + 3, draw: (x0, y0) => { fonte(6.8, true, C.mut); doc.text(rot.toUpperCase(), x0, y0 + 3); doc.setDrawColor(...C.borda); doc.setLineWidth(0.2); doc.line(x0, y0 + 5, x0 + IW, y0 + 5); p.draw(x0, y0 + 7); } };
+    const cab = { h: 7, draw: (x0, y0) => { fonte(6.8, true, C.mut); doc.text(rot.toUpperCase(), x0, y0 + 3); doc.setDrawColor(...C.borda); doc.setLineWidth(0.2); doc.line(x0, y0 + 5, x0 + IW, y0 + 5); } };
+    return { h: 8 + p.h + 3, draw: (x0, y0) => { cab.draw(x0, y0); p.draw(x0, y0 + 7); },
+      partes: maxH => { const P = p.partes ? p.partes(maxH - 11) : [p]; return [junto([cab, P[0], espaco(4)]), ...P.slice(1).map((q, i, A) => i === A.length - 1 ? junto([q, espaco(4)]) : q)]; } };
   };
   const espaco = h => ({ h, draw: () => {} });
   // junta vários itens para não separar um teste do seu gráfico entre páginas
-  const junto = L => ({ h: L.reduce((a, b) => a + b.h, 0), draw: (x0, y0) => { let yy = y0; L.forEach(it => { it.draw(x0, yy); yy += it.h; }); } });
+  const junto = L => ({ h: L.reduce((a, b) => a + b.h, 0), draw: (x0, y0) => { let yy = y0; L.forEach(it => { it.draw(x0, yy); yy += it.h; }); },
+    partes: maxH => L.flatMap(it => it.h > maxH && it.partes ? it.partes(maxH) : [it]) });
   // observação numa caixa cinza (aceita texto formatado)
   const obs = txt => {
-    const r = rico(txt, { s: 8, larg: IW - 8 }); const h = r.h + 4;
-    return { h: h + 3, draw: (x0, y0) => { doc.setFillColor(...C.fundo); doc.rect(x0, y0, IW, h, 'F'); doc.setFillColor(...C.ref); doc.rect(x0, y0, 0.8, h, 'F'); r.draw(x0 + 4, y0 + 2); } };
+    const caixa = r => { const h = r.h + 4; return { h: h + 3, draw: (x0, y0) => { doc.setFillColor(...C.fundo); doc.rect(x0, y0, IW, h, 'F'); doc.setFillColor(...C.ref); doc.rect(x0, y0, 0.8, h, 'F'); r.draw(x0 + 4, y0 + 2); } }; };
+    const r = rico(txt, { s: 8, larg: IW - 8 }), c = caixa(r);
+    c.partes = maxH => (r.partes ? r.partes(maxH - 7) : [r]).map(caixa); return c;
   };
   const tituloTeste = t => { fonte(10, true); const L = doc.splitTextToSize(t.toUpperCase(), IW); return { h: L.length * lh(10) + 2.5, draw: (x0, y0) => { fonte(10, true); L.forEach((l, i) => doc.text(l, x0, y0 + lh(10) * (i + 0.8))); } }; };
   // gráfico de colunas: resultado x referência
@@ -182,7 +196,10 @@ function gerarPdfAvaliacao(x){
   // cartão com título e barra lateral; se não couber na página, continua em outro cartão
   const cartao = (titulo, itens) => {
     itens = itens.filter(Boolean); if (!itens.length) return;
-    const TH = titulo ? 10 : PAD;
+    const TH = titulo ? 10 : PAD, MAXH = BOT - TOP - TH - PAD - 2;
+    // item maior que uma página inteira é dividido (antes era desenhado para fora da folha e o fim sumia)
+    const dividir = L => L.flatMap(it => it.h > MAXH && it.partes ? dividir(it.partes(MAXH)) : [it]);
+    itens = dividir(itens);
     let i = 0, primeiro = true;
     while (i < itens.length){
       if (y + TH + itens[i].h + PAD > BOT) novaPagina();
@@ -227,7 +244,7 @@ function gerarPdfAvaliacao(x){
 
   // ----- composição corporal -----
   const linhas = [];
-  if (v.altura) linhas.push(['Altura', fmtNum(num(v.altura) / 100, 2) + ' m', '—']);
+  if (v.altura) linhas.push(['Altura', fmtNum(altCm(num(v.altura)) / 100, 2) + ' m', '—']);
   if (v.massa) linhas.push(['Massa corporal', fmtNum(num(v.massa), 1) + ' kg', '—']);
   if (K.imc) linhas.push(['IMC', fmtNum(K.imc.valor, 2) + ' kg/m²', K.imc.cls]);
   if (v.pescoco) linhas.push(['Circunferência do pescoço', fmtNum(num(v.pescoco), 1) + ' cm', '—']);
@@ -274,7 +291,7 @@ function gerarPdfAvaliacao(x){
         else if (maos && maos.lista.length) itens.push(graficoColunas('', 0, 0, [...maos.lista.map(([l, val]) => ['Mão ' + l, val, l === 'esquerda' ? [122, 91, 196] : [15, 143, 127]]), ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
         else if (id === 'preensao' && r != null) itens.push(graficoColunas('', 0, 0, [['Resultado', r, C.res], ...(t.pred > 0 ? [['Referência', t.pred, C.ref]] : [])]));
         else if (r != null && t.pred > 0) itens.push(graficoColunas(tipo === 'extra' ? 'Resultado' : nm.split(' (')[0].length <= 14 ? nm : 'Resultado', r, t.pred, null, t.lin != null ? [t.lin, `limite inferior: ${fmtNum(t.lin, 1)}${u ? ' ' + u : ''}`] : null));
-        else if (r != null && t.cls) itens.push(graficoFaixa(r, AV_CLS[id], u, t.cls));
+        else if (r != null && t.cls && !t.foraEscala) itens.push(graficoFaixa(r, AV_CLS[id], u, t.cls));
       }
       if (v[`t_${id}_o`]) itens.push(obs(v[`t_${id}_o`]));
       todos.push(junto(itens)); itens = todos;

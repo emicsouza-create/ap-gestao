@@ -4,6 +4,7 @@
 const RT_BLOCOS = ['P', 'DIV', 'BLOCKQUOTE', 'UL', 'OL', 'LI'];
 const RT_INLINE = { B: 'b', STRONG: 'b', I: 'i', EM: 'i', U: 'u' };
 const RT_ALINHA = ['left', 'center', 'right', 'justify'];
+const RT_FORA = ['STYLE', 'SCRIPT', 'HEAD', 'META', 'TITLE', 'LINK', 'TEMPLATE', 'NOSCRIPT', 'SVG', 'MATH', 'XML', 'IFRAME', 'OBJECT'];
 const rtTemHtml = s => typeof s === 'string' && /<\/?(p|div|blockquote|ul|ol|li|b|i|u|font|br)\b/i.test(s);
 // texto antigo (sem formatação) vira parágrafos
 const rtDeTexto = s => String(s || '').split(/\n/).map(l => `<div>${esc(l) || '<br>'}</div>`).join('');
@@ -16,7 +17,11 @@ function rtLimpar(html){
     de.childNodes.forEach(n => {
       if (n.nodeType === 3){ para.appendChild(document.createTextNode(n.data)); return; }
       if (n.nodeType !== 1) return;
-      const tag = n.tagName; let novo = null;
+      const tag = n.tagName.toUpperCase(); let novo = null;
+      // conteúdo que não é texto (estilos do Word, scripts, cabeçalho) é descartado
+      if (RT_FORA.includes(tag)) return;
+      // o Google Docs embrulha tudo em <b style="font-weight:normal">: isso não é negrito
+      if ((tag === 'B' || tag === 'STRONG') && /font-weight:\s*(normal|[1-5]00)\b/i.test(n.getAttribute('style') || '')){ copiar(n, para); return; }
       if (tag === 'BR') novo = document.createElement('br');
       else if (RT_BLOCOS.includes(tag)) novo = document.createElement(tag === 'P' ? 'div' : tag.toLowerCase());
       else if (RT_INLINE[tag]) novo = document.createElement(RT_INLINE[tag]);
@@ -84,13 +89,15 @@ function rtBlocos(valor){
   const html = rtHtml(valor); if (!html) return [];
   const raiz = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html').body.firstChild;
   const blocos = []; let atual = null;
-  const novo = (ctx) => { atual = { alinha: ctx.alinha || '', citacao: !!ctx.citacao, lista: ctx.lista || '', trechos: [] }; blocos.push(atual); };
+  const novo = (ctx) => { atual = { alinha: ctx.alinha || '', citacao: !!ctx.citacao, lista: ctx.lista || '', nivel: ctx.nivel || 0, trechos: [] }; blocos.push(atual); };
   const andar = (n, ctx, est) => {
     if (n.nodeType === 3){ if (!atual) novo(ctx); if (n.data) atual.trechos.push(Object.assign({ t: n.data.replace(/\s+/g, ' ') }, est)); return; }
     if (n.nodeType !== 1) return;
     const tag = n.tagName, al = ((n.getAttribute('style') || '').match(/text-align:\s*(\w+)/) || [])[1];
     if (tag === 'BR'){ if (!atual) novo(ctx); atual.trechos.push({ t: '\n' }); return; }
-    if (tag === 'UL' || tag === 'OL'){ let i = 0; n.childNodes.forEach(c => { i++; andar(c, Object.assign({}, ctx, { lista: tag === 'OL' ? i + '.' : '•' }), est); }); atual = null; return; }
+    if (tag === 'UL' || tag === 'OL'){ let i = 0; const nivel = (ctx.nivel || 0) + (ctx.lista ? 1 : 0);
+      // só os itens (LI) contam na numeração; espaços entre eles não
+      n.childNodes.forEach(c => { if (c.nodeType === 1 && c.tagName === 'LI') i++; else if (c.nodeType === 3 && !c.data.trim()) return; andar(c, Object.assign({}, ctx, { lista: tag === 'OL' ? i + '.' : '•', nivel }), est); }); atual = null; return; }
     if (RT_BLOCOS.includes(tag)){
       const c2 = Object.assign({}, ctx, al ? { alinha: al } : {}, tag === 'BLOCKQUOTE' ? { citacao: true } : {});
       atual = null; novo(c2); n.childNodes.forEach(c => andar(c, c2, est)); atual = null; return;

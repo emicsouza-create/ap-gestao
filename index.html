@@ -2,6 +2,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://vflkjwjmoaxwadrvesqy.supabase.co; media-src 'self' blob: https://vflkjwjmoaxwadrvesqy.supabase.co; connect-src 'self' https://vflkjwjmoaxwadrvesqy.supabase.co wss://vflkjwjmoaxwadrvesqy.supabase.co; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>AP Gestão</title>
 <meta name="theme-color" content="#4f7d87">
@@ -28,8 +30,9 @@
 <nav class="bnav" id="bnav" hidden aria-label="Menu principal"></nav>
 <dialog id="dlg"></dialog>
 <div class="toast" id="toast" hidden></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- bibliotecas guardadas no próprio app (antes vinham de sites de terceiros, que poderiam ler a sessão se fossem invadidos) -->
+<script src="lib/supabase.js"></script>
+<script src="lib/jspdf.umd.min.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
 <script src="contrato.js"></script>
@@ -38,6 +41,5 @@
 <script src="relatorio.js"></script>
 <script src="gestao.js"></script>
 <script src="grade.js"></script>
-<script>if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
 </body>
 </html>

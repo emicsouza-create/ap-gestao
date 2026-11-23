@@ -77,6 +77,8 @@ const today = () => isoD(new Date());
 const addDays = (s, n) => { const d = parseD(s); d.setDate(d.getDate()+n); return isoD(d); };
 const diffDays = (a, b) => Math.round((parseD(a) - parseD(b)) / 86400000);
 const fmtD = s => s ? parseD(s).toLocaleDateString('pt-BR') : '';
+// horário salvo em UTC (toISOString) vira a data do Brasil
+const isoLocal = s => { if (!s) return ''; if (String(s).length <= 10) return s; const d = new Date(s); return isNaN(d) ? String(s).slice(0, 10) : isoD(d); };
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const mesNome = m => { const [y,mm] = m.split('-').map(Number); return MESES[mm-1]+' de '+y; };
 const curMes = () => today().slice(0,7);
@@ -103,13 +105,18 @@ function pixKey(k){
   k = String(k||'').trim();
   if (k.includes('@')) return k.toLowerCase();
   if (k.startsWith('+')) return '+' + k.replace(/\D/g,'');
-  if (/^[\d.\-\/\s]+$/.test(k)) return k.replace(/\D/g,'');
+  const dig = k.replace(/\D/g,'');
+  // telefone escrito como (45) 99917-2888 ou 45 99917-2888: o Pix exige +55 (sem isso o banco lê como CPF)
+  if (/^[\d()\-\s]+$/.test(k) && /[()\s]/.test(k) && !k.includes('.') && (dig.length === 10 || dig.length === 11)) return '+55' + dig;
+  if (/^[\d.\-\/\s]+$/.test(k)) return dig;
   return k;
 }
 function pixPayload(cfg, valor){
   const key = pixKey(cfg.pixChave); if (!key) return '';
-  const name = noAccent(cfg.pixNome || 'AP FISIOTERAPIA').toUpperCase().slice(0,25);
-  const city = noAccent(cfg.pixCidade || 'CASCAVEL').toUpperCase().slice(0,15);
+  // o Pix só aceita letras sem acento, números e símbolos simples no nome e na cidade
+  const limpo = x => noAccent(x).replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+  const name = limpo(cfg.pixNome || 'AP FISIOTERAPIA').slice(0,25) || 'AP FISIOTERAPIA';
+  const city = limpo(cfg.pixCidade || 'CASCAVEL').slice(0,15) || 'CASCAVEL';
   let p = tlv('00','01') + tlv('26', tlv('00','br.gov.bcb.pix') + tlv('01', key)) + tlv('52','0000') + tlv('53','986');
   if (valor > 0) p += tlv('54', Number(valor).toFixed(2));
   p += tlv('58','BR') + tlv('59', name) + tlv('60', city) + tlv('62', tlv('05','***')) + '6304';
@@ -162,14 +169,14 @@ function msgCobranca(c){
     m += `Com ${i.dias} dia${i.dias>1?'s':''} de atraso, o valor atualizado é ${brl(i.total)} (multa de ${C.multa}% e juros de ${C.juros}% ao mês, conforme o contrato).\n\n`;
     m += `Se já pagou, pode desconsiderar e me mandar o comprovante, por favor.`;
   } else {
-    m += `Estou enviando a mensagem referente ao fechamento do mês de ${MESES[Number(c.mes.slice(5))-1]}. O pacote de fisioterapia de ${p.nome || 'paciente'} ficou em ${brl(i.valor)}.\n\nO pagamento pode ser feito entre os dias 10 e ${pad(c.vencDia || C.vencDia)} de ${MESES[Number(shiftMes(c.mes,1).slice(5))-1]}.`;
+    m += `Estou enviando a mensagem referente ao fechamento do mês de ${MESES[Number(c.mes.slice(5))-1]}. O pacote de fisioterapia de ${p.nome || 'paciente'} ficou em ${brl(i.valor)}.\n\nO pagamento pode ser feito ${(Number(c.vencDia || C.vencDia) || 15) > 10 ? `entre os dias 10 e ${pad(c.vencDia || C.vencDia)}` : `até o dia ${pad(c.vencDia || C.vencDia)}`} de ${MESES[Number(shiftMes(c.mes,1).slice(5))-1]}.`;
   }
   const pix = pixPayload(C, i.dias > 0 ? i.total : i.valor);
   if (pix) m += `\n\nPix copia e cola:\n${pix}`;
   m += `\n\nQualquer dúvida, estou à disposição.\n${C.assinatura}`;
   return m;
 }
-const waLink = (tel, text) => { let d = String(tel||'').replace(/\D/g,''); if (!d) return ''; if (d.length <= 11) d = '55' + d; return 'https://wa.me/' + d + '?text=' + encodeURIComponent(text); };
+const waLink = (tel, text) => { let d = String(tel||'').replace(/\D/g,'').replace(/^0+/, ''); if (!d) return ''; if (d.length <= 11) d = '55' + d; return 'https://wa.me/' + d + '?text=' + encodeURIComponent(text); };
 
 // ---------- alertas ----------
 function alertas(){
@@ -178,7 +185,7 @@ function alertas(){
     Object.values(S.cobrancas).forEach(c => { const i = cobInfo(c); if (!i.pago && i.dias > 30) A.push(['bad', `${pacNome(c.pid)}: ${i.dias} dias de atraso (sessões de ${mesNome(c.mes)}). Pelo contrato, já pode suspender os atendimentos.`, 'cobranca']); else if (!i.pago && i.dias > 0) A.push(['bad', `${pacNome(c.pid)}: pagamento das sessões de ${mesNome(c.mes)} atrasado há ${i.dias} dia${i.dias>1?'s':''} · ${brl(i.total)}`, 'cobranca']); });
     if (!Object.values(S.cobrancas).some(c => c.mes === refAtual())) A.push(['warn', `As cobranças das sessões de ${mesNome(refAtual())} (pagamento até dia ${cfg().vencDia}) ainda não foram geradas.`, 'cobranca']);
     pacAtivos().forEach(p => {
-      if (p.inicio){ const ani = addDays(p.inicio, 0); const d = parseD(p.inicio); const n = new Date(d); n.setFullYear(d.getFullYear() + Math.max(1, new Date().getFullYear() - d.getFullYear())); const prox = isoD(n); const falta = diffDays(prox, t); if (falta >= 0 && falta <= 30) A.push(['warn', `${p.nome}: contrato faz aniversário em ${fmtD(prox)}. Avisar o reajuste anual.`, 'pacientes']); }
+      if (p.inicio){ const d = parseD(p.inicio); const n = new Date(d); n.setFullYear(Math.max(d.getFullYear() + 1, parseD(t).getFullYear())); if (isoD(n) < t) n.setFullYear(n.getFullYear() + 1); const prox = isoD(n); const falta = diffDays(prox, t); if (falta >= 0 && falta <= 30) A.push(['warn', `${p.nome}: contrato faz aniversário em ${fmtD(prox)}. Avisar o reajuste anual.`, 'pacientes']); }
       if (S.loaded.planos && p.status === 'ativo' && !S.planos[p._id]?.conferido) A.push(['warn', `${p.nome}: valor do pacote ainda não conferido. Sem isso, a mensagem do fechamento do mês não é enviada.`, 'pacientes']);
     });
   }
@@ -319,7 +326,7 @@ function vHoje(){
     ${d !== t ? '<button class="btn sm" data-act="dia" data-n="0">Hoje</button>' : ''}
     <button class="ibtn" data-act="dia" data-n="1" aria-label="Próximo dia">${ICON.right}</button>
   </div>
-  ${isAdmin && d === t && typeof listaSumindo === 'function' && listaSumindo(14).length ? `<div class="cta" style="background:var(--bad-soft)"><div class="tx">${listaSumindo(14).length} pacientes sem atendimento há 14 dias ou mais · ${brl(listaSumindo(14).reduce((s, x) => s + x.valor, 0))} por mês em risco</div><button class="btn sm" data-tab="sumindo">Ver quem é</button></div>` : ''}
+  ${isAdmin && d === t && typeof listaSumindo === 'function' && listaSumindo(14).length ? `<div class="cta" style="background:var(--bad-soft)"><div class="tx">${listaSumindo(14).length === 1 ? '1 paciente sumindo' : listaSumindo(14).length + ' pacientes sumindo'} (sem atendimento há 14 dias ou com 2 faltas no mês) · ${brl(listaSumindo(14).reduce((s, x) => s + x.valor, 0))} por mês em risco</div><button class="btn sm" data-tab="sumindo">Ver quem é</button></div>` : ''}
   ${f ? `<div class="cta warnbox"><div class="tx">${esc(f.tipo==='ferias'?'Férias coletivas':'Feriado')}${f.desc?': '+esc(f.desc):''}. Sem atendimento.</div></div>`:''}
   ${nomes.length ? `<div class="grid g2">${nomes.map(n => { const M = L.filter(a => (a.fisio||'') === n).sort(agSort);
       const at = M.filter(a => a.tipo !== 'outro'), fe = at.filter(a => a.status && a.status !== 'agendado').length;
@@ -333,18 +340,18 @@ function vHoje(){
 // ---------- linha de atendimento ----------
 const TICK = {feito: ICON.check, falta: ICON.x, remarcado: ICON.redo, cancelado: ICON.minus};
 function agRow(a, mostrarFisio){
-  const s = a.status || 'agendado', st = STATUS_AG[s], p = S.pacientes[a.pid];
+  const s = STATUS_AG[a.status] ? a.status : 'agendado', st = STATUS_AG[s], p = S.pacientes[a.pid];
   const outro = a.tipo === 'outro', conf = !a.pid && !outro && a.tipo !== 'avaliacao', evo = S.evolucoes[a._id];
   const meta = [mostrarFisio && a.fisio ? a.fisio.split(' ')[0] : '', a.tipo === 'avaliacao' ? 'Avaliação' : '', outro ? 'Compromisso' : '', s !== 'agendado' ? st[0] : '',
     p?.status === 'internado' ? 'Paciente internado' : '', conf ? 'Confirmar paciente' : '', evo ? 'Evolução registrada' : '', a.obs || ''].filter(Boolean).join(' · ');
   const tick = outro ? `<span class="tick hora">${esc(a.hora || '')}</span>`
-    : canWrite && s === 'agendado' ? `<button class="tick" data-act="ag-feito" data-id="${a._id}" aria-label="Marcar ${esc(p?.nome || a.pnome || '')} como realizado"></button>`
-    : `<button class="tick ${s}" data-act="ag-sheet" data-id="${a._id}" aria-label="${esc(st[0])}">${TICK[s] || ''}</button>`;
+    : canWrite && s === 'agendado' ? `<button class="tick" data-act="ag-feito" data-id="${esc(a._id)}" aria-label="Marcar ${esc(p?.nome || a.pnome || '')} como realizado"></button>`
+    : `<button class="tick ${s}" data-act="ag-sheet" data-id="${esc(a._id)}" aria-label="${esc(st[0])}">${TICK[s] || ''}</button>`;
   return `<div class="arow s-${s}${conf ? ' conf' : ''}"><div class="tickcell">${tick}</div>
-    <button class="arow-main" data-act="ag-sheet" data-id="${a._id}"><span class="tx"><span class="t">${a.hora && !outro ? `<b class="hr">${esc(a.hora)}</b>` : ''}${esc(p?.nome || a.pnome || '?')}</span>${meta ? `<span class="m">${esc(meta)}</span>` : ''}</span>${ICON.chev}</button></div>`;
+    <button class="arow-main" data-act="ag-sheet" data-id="${esc(a._id)}"><span class="tx"><span class="t">${a.hora && !outro ? `<b class="hr">${esc(a.hora)}</b>` : ''}${esc(p?.nome || a.pnome || '?')}</span>${meta ? `<span class="m">${esc(meta)}</span>` : ''}</span>${ICON.chev}</button></div>`;
 }
 function agSheet(id){
-  const a = S.agenda[id]; if (!a) return; const p = S.pacientes[a.pid] || {}; const s = a.status || 'agendado';
+  const a = S.agenda[id]; if (!a) return; const p = S.pacientes[a.pid] || {}; const s = STATUS_AG[a.status] ? a.status : 'agendado';
   const outro = a.tipo === 'outro', evo = S.evolucoes[id];
   sheet(p.nome || a.pnome || 'Atendimento', [fmtD(a.data), a.hora, a.fisio, s !== 'agendado' ? STATUS_AG[s][0] : ''].filter(Boolean).join(' · '), [
     canWrite && !outro && s === 'agendado' && {act:'ag-feito', id, icon:ICON.check, label:'Marcar como realizado', cls:'pri'},
@@ -381,7 +388,7 @@ function vAgenda(){
     if (!L.length && !f && (wd === 0 || wd === 6)) return '';
     const ok = L.filter(a => a.tipo !== 'outro' && a.status && a.status !== 'agendado').length, tot = L.filter(a => a.tipo !== 'outro').length;
     return `<section class="day ${d===t?'today':''}"><h3><span class="dname">${DIAS[wd]}</span><span class="dnum">${curto(d)}</span>${d===t?'<span class="chip">Hoje</span>':''}<span class="dcount">${f ? esc(f.tipo==='ferias'?'Férias':'Feriado') : tot ? `${ok}/${tot}` : ''}</span></h3>
-    <div class="panel list">${L.length ? L.map(a => agRow(a, !agFisio)).join('') : `<div class="empty sm">${f ? 'Sem atendimento.' : 'Nada marcado.'}${f && isAdmin ? ` <button class="btn sm ghost" data-act="data-del" data-id="${f._id}">Remover ${f.tipo==='ferias'?'férias':'feriado'}</button>` : ''}</div>`}</div></section>`; }).join('')}`;
+    <div class="panel list">${L.length ? L.map(a => agRow(a, !agFisio)).join('') : `<div class="empty sm">${f ? 'Sem atendimento.' : 'Nada marcado.'}${f && isAdmin ? ` <button class="btn sm ghost" data-act="data-del" data-id="${esc(f._id)}">Remover ${f.tipo==='ferias'?'férias':'feriado'}</button>` : ''}</div>`}</div></section>`; }).join('')}`;
 }
 
 // ---------- PACIENTES ----------
@@ -405,7 +412,7 @@ function vPacientes(){
   <section class="panel list">${L.length ? L.map(p => {
     const pl = S.planos[p._id] || {}; const st = STATUS_PAC[p.status] || ['—','mute'];
     const chip = p.status !== 'ativo' ? [st[0], st[1]] : isAdmin && !pl.conferido ? ['Conferir valor','warn'] : !p.contrato ? ['Sem contrato','warn'] : null;
-    return `<button class="irow" data-act="pac-edit" data-id="${p._id}"><span class="tx"><span class="t">${esc(p.nome)}</span>
+    return `<button class="irow" data-act="pac-edit" data-id="${esc(p._id)}"><span class="tx"><span class="t">${esc(p.nome)}</span>
       <span class="m">${esc([p.frequencia ? p.frequencia + 'x por semana' : '', pacFisios(p).length ? pacFisios(p).map(n => n.split(' ')[0]).join(' e ') : 'sem fisio definida', p.exclusivo ? 'exclusivo Ana' : ''].filter(Boolean).join(' · '))}</span></span>
       <span class="r">${isAdmin ? `<span class="num">${pl.valor ? brl(pl.valor) : '—'}</span>` : ''}${chip ? `<span class="chip ${chip[1]}">${chip[0]}</span>` : ''}</span>${ICON.chev}</button>`; }).join('')
     : `<div class="empty">${todos.length ? 'Ninguém aqui com esse filtro.' : 'Nenhum paciente cadastrado ainda.'}</div>`}</section>`;
@@ -442,9 +449,9 @@ function vCobranca(){
   <div class="seg">${Object.keys(grupos).map(k => `<button data-act="cobf" data-v="${k}" aria-pressed="${cobFiltro===k}">${rot[k]}<span class="n">${T.filter(grupos[k]).length}</span></button>`).join('')}</div>
   <section class="panel list">${L.length ? L.map(c => { const i = I.get(c._id); const pl = S.planos[c.pid] || {};
     const m = i.pago ? `pago em ${fmtD(c.pagoEm)}${c.nfPedidaEm ? ' · nota pedida' : ''}` : `${i.st[0]}${i.dias > 0 ? ' há ' + i.dias + ' dia' + (i.dias>1?'s':'') : ''}${pl.pagador ? ' · ' + pl.pagador : ''}${c.msgEnviadaEm ? ' · mensagem enviada' : ''}`;
-    const lado = !i.pago ? `<button class="btn sm pri" data-act="cob-pay" data-id="${c._id}">Pago</button>`
-      : !c.nfPedidaEm ? `<button class="btn sm" data-act="nf" data-id="${c._id}">Pedir nota</button>` : '<span class="chip ok">Nota pedida</span>';
-    return `<div class="rowwrap"><button class="irow" data-act="cob-sheet" data-id="${c._id}"><span class="tx"><span class="t">${esc(pacNome(c.pid))}</span><span class="m ${!i.pago && i.dias > 0 ? 'bad' : ''}">${esc(m)}</span></span>
+    const lado = !i.pago ? `<button class="btn sm pri" data-act="cob-pay" data-id="${esc(c._id)}">Pago</button>`
+      : !c.nfPedidaEm ? `<button class="btn sm" data-act="nf" data-id="${esc(c._id)}">Pedir nota</button>` : '<span class="chip ok">Nota pedida</span>';
+    return `<div class="rowwrap"><button class="irow" data-act="cob-sheet" data-id="${esc(c._id)}"><span class="tx"><span class="t">${esc(pacNome(c.pid))}</span><span class="m ${!i.pago && i.dias > 0 ? 'bad' : ''}">${esc(m)}</span></span>
       <span class="r"><span class="num">${brl(i.pago ? (Number(c.valorPago) || i.valor) : i.total)}</span></span></button><div class="side">${lado}</div></div>`; }).join('')
     : `<div class="empty">${T.length ? 'Nada aqui com esse filtro.' : faltam ? 'Nenhuma cobrança deste mês ainda. Use "Gerar cobranças".' : 'Nenhuma cobrança deste mês. Confira o valor do pacote de cada paciente para gerar.'}</div>`}</section>
   <div class="morebar"><button class="btn" data-act="cob-contador" ${T.some(c=>c.pagoEm)?'':'disabled'}>Lista para o contador</button><button class="btn" data-act="cob-new">Cobrança avulsa</button><button class="btn ghost" data-act="cfg">${ICON.cfg} Dados de cobrança</button></div>`;
@@ -485,8 +492,8 @@ function nfSheet(id, depoisDoPagamento){
   d.innerHTML = `<div class="dlg"><h2>${depoisDoPagamento ? 'Pagamento salvo' : 'Pedir nota fiscal'}</h2>
     <p class="sub" style="margin:0">${depoisDoPagamento ? 'Agora peça a nota fiscal deste pagamento para ' : 'Mensagem para '}${esc(C.contadorNome)}.${!pl.cpf ? ' Falta o CPF/CNPJ de quem paga no cadastro do paciente.' : ''}</p>
     <pre class="msg" id="msgTxt">${esc(txt)}</pre>
-    <div class="foot">${link ? `<a class="btn pri" href="${esc(link)}" target="_blank" rel="noopener" data-act="nf-marcar" data-id="${id}">${ICON.wpp} Enviar no WhatsApp</a>` : '<span class="sub" style="margin:0">Cadastre o WhatsApp da contabilidade em Dados de cobrança.</span>'}
-      <button class="btn" data-act="nf-copiar" data-id="${id}">Copiar</button><button class="btn ghost" data-act="close">Agora não</button></div></div>`;
+    <div class="foot">${link ? `<a class="btn pri" href="${esc(link)}" target="_blank" rel="noopener" data-act="nf-marcar" data-id="${esc(id)}">${ICON.wpp} Enviar no WhatsApp</a>` : '<span class="sub" style="margin:0">Cadastre o WhatsApp da contabilidade em Dados de cobrança.</span>'}
+      <button class="btn" data-act="nf-copiar" data-id="${esc(id)}">Copiar</button><button class="btn ghost" data-act="close">Agora não</button></div></div>`;
   if (!d.open) d.showModal();
 }
 
@@ -509,13 +516,12 @@ function cfgForm(){
 
 // ---------- PRIMEIRO ACESSO ----------
 function vPedido(){
-  const nomes = Object.values(S.equipe).filter(e => e.ativo !== false).map(e => e.nome).sort();
   return `<div class="panel" style="max-width:520px;margin:20px auto;padding:20px;display:flex;flex-direction:column;gap:14px">
     <h1>Primeiro acesso</h1>
     ${pedidoFeito ? `<p>Pedido enviado. Assim que a Emi liberar, esta tela abre a sua agenda sozinha.</p>` : `
-    <p class="sub" style="margin:0">Escolha o seu nome e peça o acesso. A Emi ou a Ana liberam do lado delas.</p>
-    <label class="form" style="display:flex;flex-direction:column;gap:6px;font-weight:600">Quem é você?
-      <select id="pedNome"><option value="">Escolha…</option>${nomes.map(n => `<option>${esc(n)}</option>`).join('')}</select></label>
+    <p class="sub" style="margin:0">Escreva o seu nome e peça o acesso. A Emi ou a Ana conferem quem é e liberam do lado delas.</p>
+    <label class="form" style="display:flex;flex-direction:column;gap:6px;font-weight:600">Seu nome
+      <input id="pedNome" maxlength="60" autocomplete="name"></label>
     <button class="btn pri" data-act="pedir">Pedir acesso</button>`}
   </div>`;
 }
@@ -586,19 +592,24 @@ function pacForm(id){
     pl_cpf:pl.cpf, pl_email:pl.email, pl_endResp:pl.endResp, pl_nasc:pl.nasc, pl_parentesco:pl.parentesco, fisios: pacFisios(p)});
   openForm(id ? p.nome : 'Novo paciente', pacFields(), v, async (d) => {
     const pid = id || db.collection('pacientes').doc().id;
+    const dd = id ? mudou(d, v) : d;
     const pd = {}; const pld = {};
-    Object.entries(d).forEach(([k,x]) => k.startsWith('pl_') ? pld[k.slice(3)] = x : pd[k] = x);
+    Object.entries(dd).forEach(([k,x]) => k.startsWith('pl_') ? pld[k.slice(3)] = x : pd[k] = x);
     if (pd.fisios) pd.fisio = pd.fisios[0] || '';
     const final = Object.assign({}, id ? stripId(S.pacientes[id]) : {criado: today()}, pd);
     if (!id && isAdmin) final.contratoGeradoEm = new Date().toISOString();
-    await db.doc('pacientes/'+pid).set(final);
-    if (isAdmin) await db.doc('planos/'+pid).set(Object.assign({}, id ? stripId(S.planos[id] || {}) : {}, pld));
+    if (id) await mesclar('pacientes/'+pid, pd); else await db.doc('pacientes/'+pid).set(final);
+    if (isAdmin) await mesclar('planos/'+pid, pld);
     if (!id && isAdmin && gerarContrato(pid, final, pld)) setTimeout(() => toast('Paciente salvo. Contrato em PDF baixado.'), 300);
     return pid;
   }, id && canWrite ? [isAdmin && ['Gerar contrato (PDF)','pac-contrato',id], isAdmin && ['Enviar aviso de privacidade','pac-aviso',id], isAdmin && ['Baixar os dados (pedido da família)','pac-dados',id], [p.status === 'inativo' ? 'Reativar paciente' : 'Inativar paciente', 'pac-inat', id], ['Excluir','pac-del',id]].filter(Boolean) : []);
   if (id){ mostrarHistorico(id); registrarAcesso('pacientes', id, p.nome); }
 }
 const stripId = o => { const c = Object.assign({}, o); delete c._id; return c; };
+// ao editar, grava só o que a pessoa mudou no formulário: o resto do registro (e o que outra pessoa salvou nesse meio-tempo) fica como está
+const normV = x => Array.isArray(x) ? JSON.stringify(x) : x === null || x === undefined ? '' : typeof x === 'boolean' ? String(x) : String(x);
+const mudou = (d, orig) => Object.fromEntries(Object.entries(d).filter(([k, x]) => normV(x) !== normV(orig?.[k])));
+async function mesclar(path, patch){ if (!Object.keys(patch).length) return; const r = db.doc(path), s = await r.get(); await r.set(Object.assign({}, s.exists ? s.data() : {}, patch)); }
 
 // ---------- ENTRADA (funil) ----------
 function vEntrada(){
@@ -612,8 +623,8 @@ function vEntrada(){
       <div class="meta" style="font-size:13px;color:var(--muted)">${[f.origem==='google'?'<span class="chip info">Google</span>':f.origem==='medico'?'<span class="chip">Indicação médica</span>':'<span class="chip mute">Outro</span>', f.medico?esc(f.medico):'', f.data?fmtD(f.data):''].filter(Boolean).join(' ')}</div>
       ${f.obs ? `<div style="font-size:13px">${esc(f.obs)}</div>`:''}
       <div class="acts" style="display:flex;gap:6px;flex-wrap:wrap">
-        ${k==='definir' ? `<button class="btn sm pri" data-act="fun-conv" data-id="${f._id}">Virar paciente</button>` : k!=='perdido' ? `<button class="btn sm pri" data-act="fun-next" data-id="${f._id}">Avançar</button>`:''}
-        <button class="btn sm" data-act="fun-edit" data-id="${f._id}">Editar</button></div></div>`).join('') || '<div style="font-size:13px;color:var(--muted);padding:6px 2px">Vazio</div>'}</div>`; }).join('')}</div>`;
+        ${k==='definir' ? `<button class="btn sm pri" data-act="fun-conv" data-id="${esc(f._id)}">Virar paciente</button>` : k!=='perdido' ? `<button class="btn sm pri" data-act="fun-next" data-id="${esc(f._id)}">Avançar</button>`:''}
+        <button class="btn sm" data-act="fun-edit" data-id="${esc(f._id)}">Editar</button></div></div>`).join('') || '<div style="font-size:13px;color:var(--muted);padding:6px 2px">Vazio</div>'}</div>`; }).join('')}</div>`;
 }
 const funFields = () => [
   {k:'nome',l:'Nome do paciente',req:1,full:1},{k:'contato',l:'Nome de quem entrou em contato'},{k:'telefone',l:'WhatsApp',t:'tel'},
@@ -635,11 +646,11 @@ function agFields(){
 function agForm(id){
   const a = id ? S.agenda[id] : {tipo:'atendimento', data: agWeek > today() ? agWeek : today(), status:'agendado', fisio: agFisio};
   openForm(id ? 'Atendimento' : 'Novo atendimento', agFields(), a, async d => {
-    if (!d.pid && !d.pnome) throw {code:'Escolha o paciente ou escreva um nome'};
+    if (!d.pid && !d.pnome) throw {aviso:'Escolha o paciente ou escreva um nome.'};
     if (!d.fisio && d.pid){ const pf = pacFisios(S.pacientes[d.pid]); d.fisio = (pf.includes(agFisio) ? agFisio : pf[0]) || ''; }
     if (d.pid) d.pnome = S.pacientes[d.pid]?.nome || d.pnome;
-    const ref = id ? db.doc('agenda/'+id) : db.collection('agenda').doc();
-    await ref.set(Object.assign({ordem: id ? (S.agenda[id].ordem||0) : 99}, d));
+    if (id) return mesclar('agenda/'+id, mudou(d, a));
+    await db.collection('agenda').doc().set(Object.assign({ordem: 99}, d));
   }, id ? [['Remarcar','ag-rem',id],['Excluir','ag-del',id]] : []);
 }
 
@@ -651,8 +662,11 @@ function cobForm(id){
     {k:'desconto',l:'Desconto (R$) · internação, férias',t:'number'},{k:'vencDia',l:'Pagar até o dia',t:'number'},
     {k:'pagoEm',l:'Pago em',t:'date'},{k:'valorPago',l:'Valor recebido (R$)',t:'number'},
     {k:'obs',l:'Observação',full:1}], c, async d => {
-      const pid = id ? c.pid : d.pid, mes = id ? c.mes : d.mes;
-      await db.doc('cobrancas/'+pid+'_'+mes).set(Object.assign({}, d, {pid, mes}));
+      const pid = id ? c.pid : d.pid, mes = id ? c.mes : d.mes, ref = db.doc('cobrancas/'+pid+'_'+mes);
+      if (id){ delete d.pid; delete d.mes; return mesclar('cobrancas/'+id, mudou(d, c)); }
+      // avulsa nunca substitui uma cobrança que já existe (paga ou não)
+      if ((await ref.get()).exists) throw {aviso:'Já existe cobrança de ' + pacNome(pid) + ' em ' + mesNome(mes) + '. Nada foi alterado. Abra essa cobrança na lista para mudar valor ou desconto.'};
+      await ref.set(Object.assign({}, d, {pid, mes}));
     }, id ? [['Excluir','cob-del',id]] : []);
 }
 
@@ -671,21 +685,22 @@ function vEquipe(){
       return `<div class="row"><div class="main"><div class="name">${esc(e.nome)} ${e.ativo===false?'<span class="chip mute">Inativa</span>':''}</div>
       <div class="meta">${esc(e.funcao||'')}${e.atende ? ` · ${pc.length} paciente${pc.length!==1?'s':''} · ${sem} atendimento${sem!==1?'s':''} nesta semana` : ''}</div>
       ${e.atende && pc.length ? `<div class="meta" style="margin-top:4px">${pc.map(p=>esc(p.nome)).join(', ')}</div>`:''}</div>
-      ${isAdmin?`<button class="btn sm ghost" data-act="eq-edit" data-id="${e._id}">Editar</button>`:''}</div>`; }).join('') : '<div class="empty">Cadastre a equipe para escolher quem atende cada paciente.</div>'}</div></section>
+      ${isAdmin?`<button class="btn sm ghost" data-act="eq-edit" data-id="${esc(e._id)}">Editar</button>`:''}</div>`; }).join('') : '<div class="empty">Cadastre a equipe para escolher quem atende cada paciente.</div>'}</div></section>
   <section><div class="head" style="margin-bottom:8px"><h2 style="margin:0">Equipamentos</h2><span class="sp"></span>${canWrite?'<button class="btn sm" data-act="eqp-new">Adicionar equipamento</button>':''}</div>
     <div class="panel list">${Q.length ? Q.map(q => `<div class="row"><div class="main"><div class="name">${esc(q.nome)}</div>
       <div class="meta">${[q.local ? 'está com: '+esc(q.local) : '', q.ultima ? 'última manutenção '+fmtD(q.ultima):''].filter(Boolean).join(' · ')}${q.obs?' · '+esc(q.obs):''}</div></div>
-      <div class="acts" style="align-items:center">${q.proxima ? `<span class="chip ${q.proxima<t?'bad':q.proxima<=addDays(t,30)?'warn':'mute'}">Manutenção ${fmtD(q.proxima)}</span>`:''}${canWrite?`<button class="btn sm ghost" data-act="eqp-edit" data-id="${q._id}">Editar</button>`:''}</div></div>`).join('') : '<div class="empty">Liste os equipamentos, onde estão e quando precisam de manutenção.</div>'}</div></section>
+      <div class="acts" style="align-items:center">${q.proxima ? `<span class="chip ${q.proxima<t?'bad':q.proxima<=addDays(t,30)?'warn':'mute'}">Manutenção ${fmtD(q.proxima)}</span>`:''}${canWrite?`<button class="btn sm ghost" data-act="eqp-edit" data-id="${esc(q._id)}">Editar</button>`:''}</div></div>`).join('') : '<div class="empty">Liste os equipamentos, onde estão e quando precisam de manutenção.</div>'}</div></section>
   </div>`;
 }
 
 function vAcessos(){
   const P = Object.values(S.pedidos||{}), L = Object.values(S.liberados||{}), pf = id => (S.pedidos||{})[id]?.email || (S.liberados||{})[id]?.email || 'e-mail não informado';
   return `<section style="margin-bottom:20px"><h2>Acesso ao app</h2><div class="panel list">
-    ${P.map(p => `<div class="row"><div class="main"><div class="name">${esc(p.nome)} pediu acesso</div><div class="meta">Conta: ${esc(pf(p._id))} · ${fmtD((p.quando||'').slice(0,10))}</div></div>
-      <div class="acts"><button class="btn sm pri" data-act="lib-agenda" data-id="${p._id}">Liberar só a agenda de ${esc(p.nome)}</button><button class="btn sm" data-act="lib-total" data-id="${p._id}">Liberar tudo</button><button class="btn sm ghost" data-act="lib-recusar" data-id="${p._id}">Recusar</button></div></div>`).join('')}
+    ${P.map(p => `<div class="row"><div class="main"><div class="name">${esc(p.nome)} pediu acesso</div><div class="meta">E-mail da conta: <b>${esc(pf(p._id))}</b> · ${fmtD(isoLocal(p.quando))}. Confira se o e-mail é mesmo dela antes de liberar.</div>
+      <label class="form" style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px">Quem é: <select id="libF-${esc(p._id)}"><option value="">Escolha da equipe…</option>${Object.values(S.equipe).filter(e => e.ativo !== false).map(e => e.nome).sort().map(n => `<option ${n === p.nome ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label></div>
+      <div class="acts"><button class="btn sm pri" data-act="lib-agenda" data-id="${esc(p._id)}">Liberar só a agenda dela</button><button class="btn sm" data-act="lib-total" data-id="${esc(p._id)}">Liberar tudo</button><button class="btn sm ghost" data-act="lib-recusar" data-id="${esc(p._id)}">Recusar</button></div></div>`).join('')}
     ${L.map(l => `<div class="row"><div class="main"><div class="name">${esc(l.fisio)}</div><div class="meta">Conta: ${esc(pf(l._id))} · ${l.nivel==='total' ? 'acesso a tudo' : 'só a própria agenda'}</div></div>
-      <div class="acts"><button class="btn sm ghost" data-act="lib-remover" data-id="${l._id}">Remover acesso</button></div></div>`).join('')}
+      <div class="acts"><button class="btn sm ghost" data-act="lib-remover" data-id="${esc(l._id)}">Remover acesso</button></div></div>`).join('')}
     ${!P.length && !L.length ? '<div class="empty">Ninguém além de você entrou ainda. Quando a Camila abrir o app pela primeira vez, o pedido dela aparece aqui.</div>' : ''}
   </div></section>
   <section style="margin-bottom:20px"><h2>Cópia de segurança</h2><div class="panel list">
@@ -696,12 +711,16 @@ function vAcessos(){
 
 // ---------- EVOLUÇÃO ----------
 let evoAg = null;
-function evoForm(agId){
-  const a = S.agenda[agId]; evoAg = agId; const e = S.evolucoes[agId];
+let evoPrev = null;
+async function evoForm(agId){
+  const a = S.agenda[agId]; if (!a) return; evoAg = agId; let e = S.evolucoes[agId];
+  // a lista da tela só traz os últimos 30 dias: evolução mais antiga é buscada no banco antes de abrir
+  if (!e){ try { const s = await db.doc('evolucoes/' + agId).get(); if (s.exists) e = Object.assign({ _id: agId }, s.data()); } catch(err){ return toast('Não consegui abrir a evolução (' + (err?.code || 'erro') + '). Tente de novo.'); } }
+  if (evoAg !== agId) return; evoPrev = e || null;
   const nome = S.pacientes[a.pid]?.nome || a.pnome || '';
   const d = $('#dlg');
   d.innerHTML = `<div class="dlg"><h2>Evolução · ${esc(nome)}</h2>
-    <p class="sub" style="margin:0">${fmtD(a.data)} · ${esc(a.fisio||'')}${e ? ` · salva por ${esc(e.fisio||'')} em ${fmtD((e.criadoEm||'').slice(0,10))}` : ''}</p>
+    <p class="sub" style="margin:0">${fmtD(a.data)} · ${esc(a.fisio||'')}${e ? ` · salva por ${esc(e.fisio||'')} em ${fmtD(isoLocal(e.criadoEm))}` : ''}</p>
     ${e ? '' : `<p class="sub" style="margin:0">Grave um áudio (o app tenta transcrever enquanto você fala), toque em "Falar" para só ditar, tire fotos ou escreva.</p>`}
     <div class="rtw" style="--rt-min:140px"><div class="lrow"><span class="sub" style="margin:0">Texto da evolução</span>${micBtn('evoTxt')}</div>
     ${rtCampo('evoTxt', 'texto', e?.texto || '', 'Texto opcional. Ex.: paciente acordado, saturação 94 em ar ambiente, fez ciclo ativo, tosse assistida com secreção clara...')}</div>
@@ -714,7 +733,7 @@ function evoForm(agId){
     <p class="sub" id="evoMsg" style="margin:0" hidden></p>
     <div id="evoHist"></div>
     <div class="foot"><span class="sp"></span>
-      <button class="btn" data-act="close">Fechar</button><button class="btn pri" data-act="evo-save" data-id="${agId}">${e ? 'Salvar alteração' : 'Salvar evolução'}</button></div></div>`;
+      <button class="btn" data-act="close">Fechar</button><button class="btn pri" data-act="evo-save" data-id="${esc(agId)}">${e ? 'Salvar alteração' : 'Salvar evolução'}</button></div></div>`;
   d.showModal();
   if (a.pid) carregarHist(a.pid, agId);
   carregarMidias(agId);
@@ -724,7 +743,7 @@ async function carregarHist(pid, skip){
     const s = await db.collection('evolucoes').where('pid','==',pid).get();
     const L = s.docs.map(x => Object.assign({_id:x.id}, x.data())).filter(x => x._id !== skip && x.tipo !== 'avaliacao').sort((a,b) => (b.data||'').localeCompare(a.data||'')).slice(0, 5);
     const box = $('#evoHist') || $('#pacHist'); if (!box) return;
-    box.innerHTML = L.length ? `<div class="sec" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:700;margin:6px 0">Últimas evoluções</div>` + L.map(x => `<div style="border-top:1px solid var(--line);padding:8px 0;font-size:14px"><b>${fmtD(x.data)}</b> · ${esc(x.fisio||'')}<div style="margin-top:4px" class="rt-ver">${rtHtml(x.texto||'')}</div>${x.nFotos || x.nAudios ? `<div class="meta" style="margin-top:4px">${[x.nFotos ? x.nFotos+' foto'+(x.nFotos>1?'s':'') : '', x.nAudios ? x.nAudios+' áudio'+(x.nAudios>1?'s':'') : ''].filter(Boolean).join(' · ')} · <button class="btn sm ghost" data-act="evo-midias" data-id="${x._id}">Ver anexos</button></div>` : ''}<div id="hm-${x._id}" class="midias"></div></div>`).join('') : (box.id === 'pacHist' ? '<p class="sub">Nenhuma evolução registrada ainda.</p>' : '');
+    box.innerHTML = L.length ? `<div class="sec" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:700;margin:6px 0">Últimas evoluções</div>` + L.map(x => `<div style="border-top:1px solid var(--line);padding:8px 0;font-size:14px"><b>${fmtD(x.data)}</b> · ${esc(x.fisio||'')}<div style="margin-top:4px" class="rt-ver">${rtHtml(x.texto||'')}</div>${x.nFotos || x.nAudios ? `<div class="meta" style="margin-top:4px">${[x.nFotos ? x.nFotos+' foto'+(x.nFotos>1?'s':'') : '', x.nAudios ? x.nAudios+' áudio'+(x.nAudios>1?'s':'') : ''].filter(Boolean).join(' · ')} · <button class="btn sm ghost" data-act="evo-midias" data-id="${esc(x._id)}">Ver anexos</button></div>` : ''}<div id="hm-${esc(x._id)}" class="midias"></div></div>`).join('') : (box.id === 'pacHist' ? '<p class="sub">Nenhuma evolução registrada ainda.</p>' : '');
   } catch(e){}
 }
 function mostrarHistorico(pid){
@@ -736,8 +755,9 @@ async function evoSave(agId){
   const ed = $('#evoTxt'), a = S.agenda[agId], txt = ed && !rtVazio(ed) ? rtLimpar(ed.innerHTML) : '', msg = $('#evoMsg');
   const M = midiasAtuais.filter(m => m.evoId === agId);
   if (!txt && !M.length){ msg.hidden = false; msg.textContent = 'Escreva, grave um áudio ou tire uma foto antes de salvar.'; return; }
-  const prev = S.evolucoes[agId];
+  let prev = evoAg === agId ? evoPrev : S.evolucoes[agId];
   try {
+    if (!prev){ const s = await db.doc('evolucoes/' + agId).get(); if (s.exists) prev = s.data(); }
     await db.doc('evolucoes/'+agId).set({pid:a.pid||'', pnome: S.pacientes[a.pid]?.nome || a.pnome || '', data:a.data, fisio:a.fisio||minhaFisio||'', texto:txt, nFotos: M.filter(m=>m.tipo==='foto').length, nAudios: M.filter(m=>m.tipo==='audio').length, criadoEm: prev?.criadoEm || new Date().toISOString(), alteradoEm: prev ? new Date().toISOString() : ''});
     if ((a.status||'agendado') === 'agendado') await db.doc('agenda/'+agId).update({status:'feito'});
     $('#dlg').close(); toast('Evolução salva'); schedule();
@@ -759,22 +779,29 @@ async function comprimirFoto(file){
     return await new Promise(ok => c.toBlob(b => ok(b || file), 'image/jpeg', 0.8));
   } catch(e){ return file; }
 }
-const extDe = t => t.includes('jpeg') ? 'jpg' : t.includes('png') ? 'png' : t.includes('webm') ? 'webm' : t.includes('ogg') ? 'ogg' : t.includes('mpeg') ? 'mp3' : t.includes('mp4') || t.includes('m4a') || t.includes('aac') ? 'm4a' : 'bin';
-async function salvarMidia(file){
-  const msg = $('#evoMsg'); const a = S.agenda[evoAg]; if (!file || !a) return;
-  const tipo = (file.type || '').startsWith('image/') ? 'foto' : 'audio';
+const extDe = t => t.includes('jpeg') ? 'jpg' : t.includes('png') ? 'png' : t.includes('heic') ? 'heic' : t.includes('heif') ? 'heif' : t.includes('webp') ? 'webp' : t.includes('webm') ? 'webm' : t.includes('opus') ? 'opus' : t.includes('ogg') ? 'ogg' : t.includes('mpeg') ? 'mp3' : t.includes('wav') ? 'wav' : t.includes('amr') ? 'amr' : t.includes('3gpp') ? '3gp' : t.includes('mp4') || t.includes('m4a') || t.includes('aac') ? 'm4a' : 'bin';
+// alguns celulares mandam o arquivo sem tipo: descobre pelo nome
+const tipoPeloNome = n => { const e = (String(n || '').split('.').pop() || '').toLowerCase(); return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', heic: 'image/heic', heif: 'image/heif', webp: 'image/webp', m4a: 'audio/mp4', mp4: 'audio/mp4', aac: 'audio/aac', mp3: 'audio/mpeg', ogg: 'audio/ogg', opus: 'audio/opus', wav: 'audio/wav', amr: 'audio/amr', '3gp': 'audio/3gpp', webm: 'audio/webm' })[e] || ''; };
+async function salvarMidia(file, agId = evoAg){
+  const msg = $('#evoMsg') || {}; const a = S.agenda[agId]; if (!file || !a) return;
+  const tipoArq = file.type || tipoPeloNome(file.name); const tipo = tipoArq.startsWith('image/') ? 'foto' : 'audio';
   msg.hidden = false; msg.textContent = tipo === 'foto' ? 'Salvando a foto…' : 'Salvando o áudio…';
   try {
     const blob = tipo === 'foto' ? await comprimirFoto(file) : file;
     if (blob.size > MAX_BYTES){ msg.textContent = 'Arquivo grande demais (máximo 25 MB).'; return; }
-    const mime = blob.type || (tipo === 'foto' ? 'image/jpeg' : 'audio/mp4');
-    const mid = novoId(); const path = `${evoAg}/${mid}.${extDe(mime)}`;
+    const mime = blob.type || tipoArq || (tipo === 'foto' ? 'image/jpeg' : 'application/octet-stream');
+    const mid = novoId(); const path = `${agId}/${mid}.${extDe(mime)}`;
     const up = await sb.storage.from('midias').upload(path, blob, { contentType: mime, upsert: false });
     if (up.error) throw { code: up.error.message };
-    await db.doc('midias/' + mid).set({evoId: evoAg, pid: a.pid||'', data: a.data, fisio: a.fisio||minhaFisio||'', tipo, mime, path, tamanho: blob.size, criadoEm: new Date().toISOString()});
+    await db.doc('midias/' + mid).set({evoId: agId, pid: a.pid||'', data: a.data, fisio: a.fisio||minhaFisio||'', tipo, mime, path, tamanho: blob.size, criadoEm: new Date().toISOString()});
     msg.textContent = (tipo === 'foto' ? 'Foto salva.' : 'Áudio salvo.') + ' Toque em "Salvar evolução" para fechar.';
-    carregarMidias(evoAg);
-  } catch(e){ msg.textContent = 'Não foi possível salvar (' + (e?.code || 'erro') + '). Tente de novo.'; }
+    if (evoAg === agId && $('#evoMidias')) carregarMidias(agId); else toast((tipo === 'foto' ? 'Foto salva' : 'Áudio salvo') + ' na evolução de ' + (S.pacientes[a.pid]?.nome || a.pnome || 'paciente'));
+  } catch(e){
+    // se o envio falhar, o áudio não se perde: o celular baixa uma cópia
+    if (tipo === 'audio'){ try { baixar(`audio-evolucao-${a.data}-${Date.now()}.${extDe(file.type || 'audio/webm')}`, file); } catch(x){} }
+    const t = 'Não foi possível salvar (' + (e?.code || 'erro') + ').' + (tipo === 'audio' ? ' Baixei uma cópia do áudio no celular.' : ' Tente de novo.');
+    if ($('#evoMsg')) msg.textContent = t; else toast(t);
+  }
 }
 async function gravarAudio(){
   const msg = $('#evoMsg'); msg.hidden = false;
@@ -789,7 +816,7 @@ async function gravarAudio(){
   let pico = 0, medir = null, actx = null;
   try { const AC = window.AudioContext || window.webkitAudioContext; actx = new AC(); const an = actx.createAnalyser(); actx.createMediaStreamSource(gravStream).connect(an);
     const buf = new Uint8Array(an.fftSize); medir = setInterval(() => { an.getByteTimeDomainData(buf); for (const x of buf) pico = Math.max(pico, Math.abs(x - 128)); }, 200); } catch(e){}
-  const txtAntes = $('#evoTxt')?.textContent || '';
+  const txtAntes = $('#evoTxt')?.textContent || '', agGrav = evoAg;
   const junto = store.get('ap.transcJunto') !== 'nao';
   gravador.onstop = () => {
     clearInterval(gravTimer); clearInterval(medir); gravStream.getTracks().forEach(t => t.stop()); try { actx && actx.close(); } catch(e){}
@@ -801,7 +828,7 @@ async function gravarAudio(){
       store.set('ap.transcJunto', 'nao');
       aviso = 'Atenção: o áudio pode ter ficado sem som porque a transcrição usou o microfone. Ouça o áudio salvo. Neste celular, a gravação não vai mais transcrever junto; use "Falar" para ditar.';
     }
-    if (blob.size) salvarMidia(blob).then(() => { if (aviso){ const m = $('#evoMsg'); if (m){ m.hidden = false; m.textContent = aviso; } } });
+    if (blob.size) salvarMidia(blob, agGrav).then(() => { if (aviso){ const m = $('#evoMsg'); if (m){ m.hidden = false; m.textContent = aviso; } } });
   };
   gravador.start(1000); gravInicio = Date.now(); botaoGravar(true);
   if (junto) ditar('evoTxt', null, { junto: true, onFalha: m => { const mm = $('#evoMsg'); if (mm){ mm.hidden = false; mm.textContent = 'Gravando. ' + m + ' O áudio continua sendo gravado.'; } } });
@@ -826,13 +853,13 @@ async function carregarMidias(evoId, alvo){
     const L = s.docs.map(d => Object.assign({_id: d.id}, d.data())).filter(m => m.path).sort((x,y) => (x.criadoEm||'').localeCompare(y.criadoEm||''));
     if (!alvo) midiasAtuais = L;
     if (!L.length){ box.innerHTML = alvo ? '<p class="sub">Sem anexos.</p>' : ''; return; }
-    box.innerHTML = L.map(m => `<div class="midia" id="m-${m._id}"><span class="sub" style="margin:0">Abrindo…</span></div>`).join('');
+    box.innerHTML = L.map(m => `<div class="midia" id="m-${esc(m._id)}"><span class="sub" style="margin:0">Abrindo…</span></div>`).join('');
     for (const m of L){
       const el = document.getElementById('m-' + m._id); if (!el) continue;
       try {
         const u = await urlDaMidia(m);
         el.innerHTML = (m.tipo === 'foto' ? `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Foto da evolução de ${fmtD(m.data)}"></a>` : `<audio controls preload="metadata" src="${esc(u)}"></audio>`)
-          + `<div class="meta">${m.tipo === 'foto' ? 'Foto' : 'Áudio'} · ${(m.tamanho/1024/1024).toFixed(1).replace('.',',')} MB${!alvo && canWrite ? ` · <button class="btn sm ghost" data-act="midia-del" data-id="${m._id}">Apagar</button>` : ''}</div>`;
+          + `<div class="meta">${m.tipo === 'foto' ? 'Foto' : 'Áudio'} · ${(m.tamanho/1024/1024).toFixed(1).replace('.',',')} MB${!alvo && canWrite ? ` · <button class="btn sm ghost" data-act="midia-del" data-id="${esc(m._id)}">Apagar</button>` : ''}</div>`;
       } catch(e){ el.innerHTML = '<span class="sub">Não consegui abrir este anexo.</span>'; }
     }
   } catch(e){ box.innerHTML = '<p class="sub">Não consegui carregar os anexos.</p>'; }
@@ -864,7 +891,7 @@ function openForm(title, fields, vals, onSave, extra){
   }).join('');
   const d = $('#dlg');
   d.innerHTML = `<form class="dlg" method="dialog" id="frm"><h2>${esc(title)}</h2><div class="form">${h}</div><p class="sub" id="frmErr" hidden style="color:var(--bad)"></p>
-    <div class="foot">${(extra||[]).map(([l,a,id]) => `<button type="button" class="btn ${a.endsWith('del')?'ghost':''}" data-act="${a}" data-id="${id}">${l}</button>`).join('')}<span class="sp"></span>
+    <div class="foot">${(extra||[]).map(([l,a,id]) => `<button type="button" class="btn ${a.endsWith('del')?'ghost':''}" data-act="${a}" data-id="${esc(id)}">${l}</button>`).join('')}<span class="sp"></span>
     <button type="button" class="btn" data-act="close">${ro?'Fechar':'Cancelar'}</button>${ro?'':'<button type="submit" class="btn pri">Salvar</button>'}</div></form>`;
   d.showModal();
   $('#frm').onsubmit = async e => {
@@ -873,7 +900,7 @@ function openForm(title, fields, vals, onSave, extra){
     fields.forEach(f => { if (f.sec) return; const el = $('#f_'+f.k); if (!el || el.disabled) return;
       out[f.k] = f.t==='multi' ? [...el.querySelectorAll('input:checked')].map(i => i.value) : f.t==='check' ? el.checked : f.t==='number' ? (el.value===''? null : Number(el.value)) : el.value.trim(); });
     try { await onSave(out); d.close(); toast('Salvo'); schedule(); }
-    catch(err){ const m = $('#frmErr'); m.hidden = false; m.textContent = 'Não foi possível salvar (' + (err?.code||'erro') + '). ' + (err?.code==='invalid_argument' ? 'Seu acesso pode ser só de leitura nesta parte.' : 'Tente de novo em alguns segundos.'); }
+    catch(err){ const m = $('#frmErr'); m.hidden = false; if (err?.aviso){ m.textContent = err.aviso; return; } m.textContent = 'Não foi possível salvar (' + (err?.code||'erro') + '). ' + (err?.code==='invalid_argument' ? 'Seu acesso pode ser só de leitura nesta parte.' : 'Tente de novo em alguns segundos.'); }
   };
 }
 function openMsg(title, text, extraBtns){
@@ -897,9 +924,10 @@ document.addEventListener('click', async e => {
   if (a === 'close') return closeDlg();
   if (a === 'copy-msg') return copy($('#msgTxt').textContent, 'Mensagem copiada');
   if (!db) return;
-  if (a === 'ditar' || a.startsWith('av-')) return avAcao(a, id, b);
-  if (['grade-fisio','grade-novo','grade-edit','grade-del','grade-lancar','evo-filtro'].includes(a)) return gradeAcao(a, id, b);
-  if (['sum-dias','sum-contato','rec-tipo','rec-preparar','rec-ok','priv-aba','reg-atualizar','lix-restaurar','backup','pac-dados','pac-aviso'].includes(a)) return gestaoAcao(a, id, b);
+  const comAviso = async f => { try { return await f(); } catch(err){ toast('Não foi possível (' + (err?.code || err?.message || 'erro') + '). Tente de novo.'); } };
+  if (a === 'ditar' || a.startsWith('av-')) return comAviso(() => avAcao(a, id, b));
+  if (a.startsWith('grade-') || a === 'evo-filtro') return comAviso(() => gradeAcao(a, id, b));
+  if (['sum-dias','sum-contato','rec-tipo','rec-destino','rec-preparar','rec-ok','priv-aba','reg-atualizar','lix-restaurar','backup','pac-dados','pac-aviso'].includes(a)) return comAviso(() => gestaoAcao(a, id, b));
   try {
   switch(a){
     case 'pac-new': return pacForm(null);
@@ -912,7 +940,7 @@ document.addEventListener('click', async e => {
     case 'evo-midias': { b.remove(); return carregarMidias(id, document.getElementById('hm-' + id)); }
     case 'pac-del': return confirmBox(`Excluir ${pacNome(id)}? Ele sai das telas e vai para a lixeira (dá para restaurar em Privacidade). Se o tratamento acabou, prefira mudar a situação para "Alta".`, async () => { await db.doc('pacientes/'+id).delete(); if (isAdmin) await db.doc('planos/'+id).delete(); });
     case 'fun-new': return openForm('Novo contato', funFields(), {etapa:'indicacao', origem:'medico', data: today()}, async d => { await db.collection('funil').doc().set(d); });
-    case 'fun-edit': return openForm(S.funil[id].nome, funFields(), S.funil[id], async d => { await db.doc('funil/'+id).set(Object.assign(stripId(S.funil[id]), d)); }, [['Excluir','fun-del',id]]);
+    case 'fun-edit': return openForm(S.funil[id].nome, funFields(), S.funil[id], async d => { await mesclar('funil/'+id, mudou(d, S.funil[id])); }, [['Excluir','fun-del',id]]);
     case 'fun-del': return confirmBox('Excluir este contato da entrada?', () => db.doc('funil/'+id).delete());
     case 'fun-next': { const f = S.funil[id]; const i = ETAPAS.findIndex(x => x[0] === (f.etapa||'indicacao')); await db.doc('funil/'+id).update({etapa: ETAPAS[Math.min(i+1, 6)][0]}); return; }
     case 'fun-conv': { const f = S.funil[id];
@@ -950,7 +978,14 @@ document.addEventListener('click', async e => {
     case 'nf-copiar': { await copy($('#msgTxt').textContent, 'Mensagem copiada'); await db.doc('cobrancas/'+id).update({nfPedidaEm: new Date().toISOString()}); return; }
     case 'cob-msg-env': { await db.doc('cobrancas/'+id).update({msgEnviadaEm: new Date().toISOString()}); setTimeout(() => { if (dlgOpen()) $('#dlg').close(); }, 400); return; }
     case 'ag-del': return confirmBox('Excluir este atendimento da agenda?', () => db.doc('agenda/'+id).delete());
-    case 'ag-undo': await db.doc('agenda/'+id).update({status:'agendado'}); return toast('Voltou para agendado');
+    case 'ag-undo': { const a0 = S.agenda[id] || {};
+      // a reposição criada na remarcação sai junto (vai para a lixeira), para não ficar sessão em dobro
+      const rid = a0.reposicaoId || Object.values(S.agenda).find(x => x.reposicaoDe === id)?._id;
+      const rp = rid && S.agenda[rid];
+      if (rp && (rp.status || 'agendado') !== 'agendado') return toast('A reposição desta sessão já foi marcada. Ajuste as duas na agenda.');
+      if (rid) await db.doc('agenda/'+rid).delete();
+      await db.doc('agenda/'+id).update({status:'agendado', obs:'', motivo:'', detalhe:'', aviso:'', novaData:'', novaHora:'', reposicaoId:'', feitoEm:'', alteradoEm:new Date().toISOString()});
+      return toast(rid ? 'Voltou para agendado. A reposição foi para a lixeira.' : 'Voltou para agendado'); }
     case 'ag-rem': { const a0 = S.agenda[id];
       openForm((a0.pnome || pacNome(a0.pid)) + ' · ' + fmtD(a0.data), [
         {k:'motivo',l:'Por que não aconteceu?',t:'select',o:MOTIVOS,full:1},
@@ -963,12 +998,16 @@ document.addEventListener('click', async e => {
         let status = d.data ? 'remarcado' : (d.aviso === 'nao' ? 'falta' : 'cancelado');
         let obs = d.data ? `Remarcado para ${fmtD(d.data)}${d.hora?' '+d.hora:''} · ${txt}` : `${txt}${d.aviso==='nao' ? ' · aviso com menos de 6h, sessão cobrada' : ''}`;
         await db.doc('agenda/'+id).update({status, obs, motivo:d.motivo, detalhe:d.detalhe||'', aviso:d.aviso, novaData:d.data||'', novaHora:d.hora||'', alteradoEm:new Date().toISOString()});
-        if (d.data) await db.collection('agenda').doc().set({pid:a0.pid||'', pnome:a0.pnome||'', tipo:a0.tipo||'atendimento', ordem:99, fisio:a0.fisio||'', data:d.data, hora:d.hora||'', status:'agendado', obs:'Reposição de '+fmtD(a0.data)});
+        if (d.data){ const rp = db.collection('agenda').doc(); await rp.set({pid:a0.pid||'', pnome:a0.pnome||'', tipo:a0.tipo||'atendimento', ordem:99, fisio:a0.fisio||'', data:d.data, hora:d.hora||'', status:'agendado', obs:'Reposição de '+fmtD(a0.data), reposicaoDe:id});
+          await db.doc('agenda/'+id).update({reposicaoId: rp.id}); }
       }); return; }
-    case 'pedir': { const n = $('#pedNome').value; if (!n) return toast('Escolha o seu nome');
+    case 'pedir': { const n = $('#pedNome').value.trim().slice(0, 60); if (!n) return toast('Escreva o seu nome');
       await db.doc('pedidos/'+myId).set({nome:n, email:meuEmail, quando:new Date().toISOString()}); pedidoFeito = true; return schedule(); }
-    case 'lib-agenda': case 'lib-total': { const p = S.pedidos[id];
-      await db.doc('liberados/'+id).set({nivel: a==='lib-total' ? 'total' : 'agenda', fisio: p.nome, email: p.email||'', em: today()}); await db.doc('pedidos/'+id).delete(); return toast('Acesso liberado'); }
+    case 'lib-agenda': case 'lib-total': { const p = S.pedidos[id]; const fis = document.getElementById('libF-' + id)?.value || '';
+      if (!fis) return toast('Escolha na lista quem é essa pessoa');
+      const liberar = async () => { await db.doc('liberados/'+id).set({nivel: a==='lib-total' ? 'total' : 'agenda', fisio: fis, email: p.email||'', em: today()}); await db.doc('pedidos/'+id).delete(); toast('Acesso liberado'); };
+      if (a === 'lib-total') return confirmBox(`Liberar TUDO (valores, cobranças e todos os pacientes) para a conta ${p.email || ''}?`, liberar);
+      await liberar(); return; }
     case 'lib-recusar': return confirmBox('Recusar este pedido?', () => db.doc('pedidos/'+id).delete());
     case 'lib-remover': return confirmBox('Remover o acesso desta pessoa? Ela volta para a tela de pedido.', () => db.doc('liberados/'+id).delete());
     case 'ag-copy': { const src = Object.values(S.agenda).filter(x => x.data >= addDays(agWeek,-7) && x.data < agWeek && x.status !== 'remarcado' && !String(x.obs||'').startsWith('Reposição'));
@@ -978,7 +1017,7 @@ document.addEventListener('click', async e => {
     case 'data-new': return openForm('Feriado ou férias', [{k:'tipo',l:'Tipo',t:'select',o:[['feriado','Feriado'],['ferias','Férias coletivas']]},{k:'desc',l:'Descrição'},{k:'data',l:'Data (ou início)',t:'date',req:1},{k:'ate',l:'Até (só para férias)',t:'date'}], {tipo:'feriado'}, d => db.collection('datas').doc().set(d));
     case 'data-del': return confirmBox('Remover esta data?', () => db.doc('datas/'+id).delete());
     case 'cob-gen': { const L = pacAtivos().filter(p => Number(S.planos[p._id]?.valor) > 0 && S.planos[p._id]?.conferido && !S.cobrancas[p._id+'_'+cobMes]);
-      return confirmBox(`Criar ${L.length} cobranças de ${mesNome(cobMes)} com o valor do pacote de cada paciente?`, async () => { for (const p of L){ const pl = S.planos[p._id]; await db.doc('cobrancas/'+p._id+'_'+cobMes).set({pid:p._id, mes:cobMes, valor:Number(pl.valor), vencDia: Number(pl.vencDia)||cfg().vencDia, desconto:null, pagoEm:'', valorPago:null, obs: p.status==='internado' ? 'Paciente internado: conferir desconto' : ''}); } toast(L.length + ' cobranças criadas'); }); }
+      return confirmBox(`Criar ${L.length} cobranças de ${mesNome(cobMes)} com o valor do pacote de cada paciente?`, async () => { let n = 0; for (const p of L){ const pl = S.planos[p._id], ref = db.doc('cobrancas/'+p._id+'_'+cobMes); if ((await ref.get()).exists) continue; n++; await ref.set({pid:p._id, mes:cobMes, valor:Number(pl.valor), vencDia: Number(pl.vencDia)||cfg().vencDia, desconto:null, pagoEm:'', valorPago:null, obs: p.status==='internado' ? 'Paciente internado: conferir desconto' : ''}); } toast(n + ' cobranças criadas'); }); }
     case 'cob-new': return cobForm(null);
     case 'cob-edit': return cobForm(id);
     case 'cob-del': return confirmBox('Excluir esta cobrança?', () => db.doc('cobrancas/'+id).delete());
@@ -1000,15 +1039,15 @@ document.addEventListener('click', async e => {
       const q = s => '"' + String(s??'').replace(/"/g,'""') + '"';
       const csv = '﻿Data;Pagador;Paciente;Valor\n' + L.map(c => [fmtD(c.pagoEm), S.planos[c.pid]?.pagador || S.pacientes[c.pid]?.responsavel || '', pacNome(c.pid), (Number(c.valorPago)||cobInfo(c).valor).toFixed(2).replace('.',',')].map(q).join(';')).join('\n');
       baixar(`recebimentos-${cobMes}.csv`, new Blob([csv], {type:'text/csv;charset=utf-8'})); return; }
-    case 'sair': await sb.auth.signOut(); return location.reload();
+    case 'sair': try { Object.keys(localStorage).filter(k => k.startsWith('ap.avDraft.')).forEach(k => localStorage.removeItem(k)); } catch(e){} await sb.auth.signOut(); return location.reload();
     case 'lg-criar': return loginAcao('criar');
     case 'lg-esqueci': return loginAcao('esqueci');
     case 'rec-start': return gravarAudio();
     case 'rec-stop': return pararGravacao();
     case 'backup-baixar': return baixarBackup();
-    case 'eq-new': case 'eq-edit': return openForm(id ? S.equipe[id].nome : 'Nova pessoa na equipe', [{k:'nome',l:'Nome',req:1,full:1},{k:'funcao',l:'Função',full:1},{k:'telefone',l:'WhatsApp',t:'tel'},{k:'atende',l:'Faz atendimentos (aparece na agenda)',t:'check'},{k:'vagasDia',l:'Vagas por dia (quantos atendimentos cabem)',t:'number'},{k:'ativo',l:'Ativa na equipe',t:'check'}], id ? S.equipe[id] : {atende:true, ativo:true}, d => (id ? db.doc('equipe/'+id) : db.collection('equipe').doc()).set(d), id ? [['Excluir','eq-del',id]] : []);
+    case 'eq-new': case 'eq-edit': return openForm(id ? S.equipe[id].nome : 'Nova pessoa na equipe', [{k:'nome',l:id ? 'Nome (não muda depois de criado: a agenda e o acesso da fisio usam esse nome)' : 'Nome',req:1,full:1,dis:!!id},{k:'funcao',l:'Função',full:1},{k:'telefone',l:'WhatsApp',t:'tel'},{k:'atende',l:'Faz atendimentos (aparece na agenda)',t:'check'},{k:'vagasDia',l:'Vagas por dia (quantos atendimentos cabem)',t:'number'},{k:'ativo',l:'Ativa na equipe',t:'check'}], id ? S.equipe[id] : {atende:true, ativo:true}, d => { if (id){ delete d.nome; return mesclar('equipe/'+id, mudou(d, S.equipe[id])); } return db.collection('equipe').doc().set(d); }, id ? [['Excluir','eq-del',id]] : []);
     case 'eq-del': return confirmBox('Excluir esta pessoa da equipe?', () => db.doc('equipe/'+id).delete());
-    case 'eqp-new': case 'eqp-edit': return openForm(id ? S.equipamentos[id].nome : 'Novo equipamento', [{k:'nome',l:'Equipamento',req:1,full:1},{k:'local',l:'Onde está (sede ou paciente)',full:1},{k:'ultima',l:'Última manutenção',t:'date'},{k:'proxima',l:'Próxima manutenção',t:'date'},{k:'obs',l:'Observação',full:1}], id ? S.equipamentos[id] : {}, d => (id ? db.doc('equipamentos/'+id) : db.collection('equipamentos').doc()).set(d), id ? [['Excluir','eqp-del',id]] : []);
+    case 'eqp-new': case 'eqp-edit': return openForm(id ? S.equipamentos[id].nome : 'Novo equipamento', [{k:'nome',l:'Equipamento',req:1,full:1},{k:'local',l:'Onde está (sede ou paciente)',full:1},{k:'ultima',l:'Última manutenção',t:'date'},{k:'proxima',l:'Próxima manutenção',t:'date'},{k:'obs',l:'Observação',full:1}], id ? S.equipamentos[id] : {}, d => id ? mesclar('equipamentos/'+id, mudou(d, S.equipamentos[id])) : db.collection('equipamentos').doc().set(d), id ? [['Excluir','eqp-del',id]] : []);
     case 'eqp-del': return confirmBox('Excluir este equipamento?', () => db.doc('equipamentos/'+id).delete());
   }} catch(err){ toast('Não foi possível: ' + (err?.code || 'erro')); }
 });
@@ -1029,7 +1068,7 @@ document.addEventListener('submit', async e => {
   try { await db.doc('config/geral').set({pixChave:g('pixChave'), pixNome:g('pixNome'), pixCidade:g('pixCidade'), multa:Number(g('multa'))||0, juros:Number(g('juros'))||0, vencDia:Number(g('vencDia'))||15, assinatura:g('assinatura')}); toast('Dados de cobrança salvos'); }
   catch(err){ toast('Não foi possível salvar: ' + (err?.code||'erro')); }
 });
-$('#dlg').addEventListener('close', schedule);
+$('#dlg').addEventListener('close', () => { pararGravacao(); schedule(); });
 
 // ---------- inicialização ----------
 async function iniciarApp(){

@@ -5,26 +5,39 @@ const LINK_AVISO = 'https://emicsouza-create.github.io/ap-gestao/privacidade.htm
 const registrarAcesso = (col, id, resumo) => { try { sb.rpc('registrar_acesso', { p_col: col, p_id: id, p_resumo: resumo || '' }).then(() => {}, () => {}); } catch(e){} };
 
 // ===== QUEM ESTÁ SUMINDO =====
-let diasSumindo = 14;
+let diasSumindo = 14, sumCache = null;
+// dias de férias coletivas e feriados entre duas datas (não contam como "sumiço")
+function diasParados(de, ate){
+  let n = 0; for (let d = addDays(de, 1); d <= ate; d = addDays(d, 1)) if (Object.values(S.datas).some(f => f.data === d || (f.ate && d >= f.data && d <= f.ate))) n++;
+  return n;
+}
 function listaSumindo(dias){
-  const t = today(), mes = t.slice(0, 7);
-  return pacAtivos().map(p => {
+  // a mesma conta é pedida várias vezes por tela: guarda o resultado por um instante
+  if (sumCache && sumCache.dias === dias && sumCache.ag === S.agenda && sumCache.pac === S.pacientes && Date.now() - sumCache.em < 2000) return sumCache.L;
+  const t = today(), mes = t.slice(0, 7), lim = addDays(t, -120);
+  // internado fica de fora: a família não deve receber "sentimos falta"
+  const L = Object.values(S.pacientes).filter(p => p.status === 'ativo' || p.status === 'verificar').map(p => {
     const A = Object.values(S.agenda).filter(a => a.pid === p._id && (a.tipo || 'atendimento') !== 'outro');
     const feitos = A.filter(a => a.status === 'feito' && a.data <= t).map(a => a.data).sort();
     const ultimo = feitos[feitos.length - 1] || '';
-    const semDias = ultimo ? Math.round((parseD(t) - parseD(ultimo)) / 864e5) : null;
-    const faltas = A.filter(a => a.data.slice(0, 7) === mes && (a.status === 'falta' || a.status === 'cancelado')).length;
+    const semDias = ultimo ? Math.round((parseD(t) - parseD(ultimo)) / 864e5) - diasParados(ultimo, t) : null;
+    // "cancelado" inclui fisio indisponível e internação: só falta do paciente conta
+    const faltas = A.filter(a => a.data.slice(0, 7) === mes && a.data <= t && a.status === 'falta').length;
+    const inicio = p.inicio || p.criado || '';
+    const novo = inicio && diffDays(t, inicio) < dias;
     const motivos = [];
     if (semDias !== null && semDias >= dias) motivos.push(`${semDias} dias sem atendimento`);
-    if (semDias === null && A.length) motivos.push('nenhum atendimento marcado como realizado nos últimos 4 meses');
-    if (faltas >= 2) motivos.push(`${faltas} faltas ou cancelamentos neste mês`);
+    if (semDias === null && !novo) motivos.push(A.some(a => a.data >= lim && a.data <= t) ? 'nenhum atendimento realizado nos últimos 4 meses' : 'nenhum atendimento na agenda nos últimos 4 meses');
+    if (faltas >= 2) motivos.push(`${faltas} faltas neste mês`);
     return { p, motivos, semDias, faltas, valor: Number(S.planos[p._id]?.valor) || 0, peso: (semDias ?? 120) + faltas * 5 };
   }).filter(x => x.motivos.length).sort((a, b) => b.peso - a.peso);
+  sumCache = { dias, ag: S.agenda, pac: S.pacientes, em: Date.now(), L };
+  return L;
 }
 function vSumindo(){
   const L = listaSumindo(diasSumindo), total = L.reduce((s, x) => s + x.valor, 0);
   const t = today(), semMarca = Object.values(S.agenda).filter(a => a.pid && a.data < t && (a.status || 'agendado') === 'agendado').length;
-  return `<div class="head"><div><h1>Quem está sumindo</h1><p class="sub">Pacientes ativos sem atendimento realizado há ${diasSumindo} dias ou mais, ou com 2 faltas ou cancelamentos no mês. Ligue antes que virem cancelamento.</p></div></div>
+  return `<div class="head"><div><h1>Quem está sumindo</h1><p class="sub">Pacientes ativos sem atendimento realizado há ${diasSumindo} dias ou mais (sem contar feriados e férias), ou com 2 faltas no mês. Pacientes internados e quem começou há menos de ${diasSumindo} dias ficam de fora. Ligue antes que virem cancelamento.</p></div></div>
   ${semMarca ? `<div class="cta warnbox"><div class="tx">${semMarca} atendimentos que já passaram estão sem marcação (realizado ou não aconteceu). Enquanto não forem marcados, esta lista pode mostrar pacientes que estão sendo atendidos normalmente.</div><button class="btn sm" data-tab="agenda">Ir para a agenda</button></div>` : ''}
   <div class="seg">${[7, 14, 21, 30].map(d => `<button data-act="sum-dias" data-v="${d}" aria-pressed="${d === diasSumindo}">${d} dias</button>`).join('')}</div>
   ${L.length ? `<div class="cta bad" style="margin:12px 0"><div><div class="k">Em risco por mês</div><div class="v" style="font-size:28px">${brl(total)}</div></div><p style="margin:0">Se ${L.length === 1 ? 'esse paciente cancelar' : `esses ${L.length} pacientes cancelarem`}, é o que a AP deixa de receber por mês (${brl(total * 12)} em um ano).</p></div>` : ''}
@@ -34,7 +47,7 @@ function vSumindo(){
       <div class="meta">${x.motivos.map(m => `<span class="chip ${/falta/.test(m) ? 'warn' : 'bad'}" style="white-space:normal">${esc(m)}</span>`).join(' ')}</div>
       <div class="meta">${esc([pacFisios(p).map(n => n.split(' ')[0]).join(' e '), p.responsavel ? 'responsável: ' + p.responsavel : '', p.contatoRetencaoEm ? 'contatado em ' + fmtD(p.contatoRetencaoEm) : ''].filter(Boolean).join(' · '))}</div></div>
       <div class="acts" style="align-items:center;flex-direction:column;gap:6px"><span class="num" style="font-weight:700">${x.valor ? brl(x.valor) + '/mês' : 'sem valor'}</span>
-      ${link ? `<a class="btn sm pri" href="${esc(link)}" target="_blank" rel="noopener" data-act="sum-contato" data-id="${p._id}">Chamar no WhatsApp</a>` : '<span class="chip warn">Sem WhatsApp</span>'}</div></div>`; }).join('') || '<div class="empty">Ninguém sumindo nesse período.</div>'}</section>
+      ${link ? `<a class="btn sm pri" href="${esc(link)}" target="_blank" rel="noopener" data-act="sum-contato" data-id="${esc(p._id)}">Chamar no WhatsApp</a>` : '<span class="chip warn">Sem WhatsApp</span>'}</div></div>`; }).join('') || '<div class="empty">Ninguém sumindo nesse período.</div>'}</section>
   <p class="sub">Conta pelos atendimentos marcados na agenda dos últimos 4 meses.</p>`;
 }
 
@@ -48,10 +61,10 @@ function vRelatorios(){
   const porPac = {}; A.forEach(a => { const o = porPac[a.pid] = porPac[a.pid] || { prev: 0, real: 0 }; o.prev++; if (a.status === 'feito') o.real++; });
   const L = Object.entries(porPac).map(([pid, o]) => ({ p: S.pacientes[pid], ...o, pct: o.real / o.prev * 100 })).filter(x => x.p).sort((a, b) => a.pct - b.pct);
   const tot = L.reduce((s, x) => ({ prev: s.prev + x.prev, real: s.real + x.real }), { prev: 0, real: 0 });
-  const per = [['Manhã cedo', '00:00', '09:00'], ['Manhã', '09:00', '12:00'], ['Tarde', '12:00', '15:00'], ['Fim da tarde', '15:00', '24:00']];
-  const dias = [1, 2, 3, 4, 5, 6];
-  const B = Object.values(S.agenda).filter(a => a.data >= ini && (a.tipo || 'atendimento') !== 'outro' && a.status !== 'remarcado' && a.status !== 'cancelado');
-  const cont = (d, [, x, y]) => B.filter(a => parseD(a.data).getDay() === d && (a.hora || '12:00') >= x && (a.hora || '12:00') < y).length;
+  const B = Object.values(S.agenda).filter(a => a.data >= ini && a.data < t && (a.tipo || 'atendimento') !== 'outro' && a.status !== 'remarcado' && a.status !== 'cancelado');
+  const per = [['Manhã cedo', '00:00', '09:00'], ['Manhã', '09:00', '12:00'], ['Tarde', '12:00', '15:00'], ['Fim da tarde', '15:00', '24:00'], ...(B.some(a => !a.hora) ? [['Sem horário', '', '']] : [])];
+  const dias = [1, 2, 3, 4, 5, 6, ...(B.some(a => parseD(a.data).getDay() === 0) ? [0] : [])];
+  const cont = (d, [, x, y]) => B.filter(a => parseD(a.data).getDay() === d && (x === '' ? !a.hora : a.hora && a.hora >= x && a.hora < y)).length;
   const max = Math.max(1, ...dias.flatMap(d => per.map(p => cont(d, p))));
   const receita = pacAtivos().reduce((s, p) => s + (Number(S.planos[p._id]?.valor) || 0), 0);
   const mesAnt = shiftMes(refAtual(), 0), recebido = Object.values(S.cobrancas).filter(c => c.mes === mesAnt && c.pagoEm).reduce((s, c) => s + (Number(c.valorPago) || Number(c.valor) || 0), 0);
@@ -67,22 +80,26 @@ function vRelatorios(){
     <section class="panel pad"><h2>Frequência por paciente</h2><p class="sub">Quem falta mais aparece primeiro.</p>
       <div class="list">${L.map(x => `<div class="row"><div class="main"><div class="name">${esc(x.p.nome)}</div><div class="pbar"><i style="width:${x.pct}%;${x.pct < 75 ? 'background:var(--bad)' : x.pct < 90 ? 'background:var(--warn)' : ''}"></i></div></div><div class="acts"><b>${Math.round(x.pct)}%</b><span class="sub" style="margin:0">${x.real}/${x.prev}</span></div></div>`).join('') || '<div class="empty">Ainda não há atendimentos suficientes na agenda.</div>'}</div></section>
     <section class="panel pad"><h2>Dias e horários mais cheios e mais vazios</h2><p class="sub">Atendimentos por dia da semana e período. Quanto mais escuro, mais cheio; os claros são onde cabe paciente novo.</p>
-      <div class="mapa"><div></div>${dias.map(d => `<div class="h">${NOMES[d]}</div>`).join('')}
+      <div class="mapa" style="--n:${dias.length}"><div></div>${dias.map(d => `<div class="h">${NOMES[d]}</div>`).join('')}
       ${per.map(p => `<div class="h" style="text-align:left">${p[0]}</div>${dias.map(d => { const n = cont(d, p), f = n / max; return `<div style="background:color-mix(in srgb, var(--accent) ${Math.round(f * 85)}%, var(--bg));${f > .55 ? 'color:#fff' : ''}" title="${NOMES[d]}, ${p[0]}: ${n}">${n}</div>`; }).join('')}`).join('')}</div></section>
   </div>`;
 }
 
 // ===== RECADOS PARA AS FAMÍLIAS =====
 let recado = { tipo: 'operacional', destino: 'todos', valor: '', texto: '' };
+// no domingo, "esta semana" é a que começa amanhã
+const semanaRecado = () => new Date().getDay() === 0 ? addDays(weekStart(today()), 7) : weekStart(today());
 function destinatariosRecado(){
   let L = pacAtivos().filter(p => p.telefone);
   if (recado.destino === 'fisio' && recado.valor) L = L.filter(p => pacFisios(p).includes(recado.valor));
-  if (recado.destino === 'dia' && recado.valor){ const wk = weekStart(today()); L = L.filter(p => Object.values(S.agenda).some(a => a.pid === p._id && a.data >= wk && parseD(a.data).getDay() === Number(recado.valor))); }
+  if (recado.destino !== 'todos' && !recado.valor) return { L: [], fora: [], falta: true };
+  if (recado.destino === 'dia'){ const wk = semanaRecado(), dt = addDays(wk, Number(recado.valor) - 1);
+    L = L.filter(p => Object.values(S.agenda).some(a => a.pid === p._id && a.data === dt && (a.tipo || 'atendimento') !== 'outro' && !['remarcado', 'cancelado'].includes(a.status))); }
   const fora = recado.tipo === 'conteudo' ? L.filter(p => p.conteudos !== 'sim') : [];
   return { L: L.filter(p => !fora.includes(p)), fora };
 }
 function vRecados(){
-  const { L, fora } = destinatariosRecado();
+  const { L, fora, falta } = destinatariosRecado();
   const H = Object.values(S.recados || {}).sort((a, b) => (b.em || '').localeCompare(a.em || '')).slice(0, 15);
   const DS = [[1, 'Segunda'], [2, 'Terça'], [3, 'Quarta'], [4, 'Quinta'], [5, 'Sexta'], [6, 'Sábado']];
   return `<div class="head"><div><h1>Recados para as famílias</h1><p class="sub">Mande um recado pelo WhatsApp para todas as famílias ou para um grupo. O WhatsApp abre uma conversa por vez, com a mensagem pronta.</p></div></div>
@@ -90,15 +107,15 @@ function vRecados(){
     <div class="seg">${[['operacional', 'Agenda e funcionamento'], ['conteudo', 'Dica ou divulgação']].map(([k, l]) => `<button data-act="rec-tipo" data-v="${k}" aria-pressed="${recado.tipo === k}">${l}</button>`).join('')}</div>
     <p class="sub">${recado.tipo === 'operacional' ? 'Vai para todas as famílias do grupo, porque faz parte do atendimento (horário, feriado, mudança).' : 'Vai só para quem deu permissão para receber dicas e conteúdos (campo no cadastro do paciente).'}</p>
     <div class="form" style="margin-top:10px">
-      <label>Para quem<select id="recDestino"><option value="todos" ${recado.destino === 'todos' ? 'selected' : ''}>Todos os pacientes ativos</option><option value="fisio" ${recado.destino === 'fisio' ? 'selected' : ''}>Pacientes de uma fisioterapeuta</option><option value="dia" ${recado.destino === 'dia' ? 'selected' : ''}>Quem é atendido em um dia desta semana</option></select></label>
+      <label>Para quem<select id="recDestino"><option value="todos" ${recado.destino === 'todos' ? 'selected' : ''}>Todos os pacientes ativos</option><option value="fisio" ${recado.destino === 'fisio' ? 'selected' : ''}>Pacientes de uma fisioterapeuta</option><option value="dia" ${recado.destino === 'dia' ? 'selected' : ''}>Quem é atendido em um dia da semana de ${fmtD(semanaRecado())}</option></select></label>
       ${recado.destino === 'fisio' ? `<label>Fisioterapeuta<select id="recValor"><option value="">Escolha…</option>${fisios().map(f => `<option ${f === recado.valor ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></label>`
         : recado.destino === 'dia' ? `<label>Dia<select id="recValor"><option value="">Escolha…</option>${DS.map(([k, l]) => `<option value="${k}" ${String(k) === recado.valor ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : '<span></span>'}
       <label class="full">Mensagem<textarea id="recTexto" placeholder="Ex.: Na sexta-feira (20/11) não teremos atendimento à tarde. Vamos combinar a reposição com cada família.">${esc(recado.texto)}</textarea></label>
     </div>
-    <p class="sub"><b>${L.length}</b> ${L.length === 1 ? 'família' : 'famílias'}${fora.length ? ` · ${fora.length} sem permissão para dicas ficam de fora` : ''}.</p>
-    <div style="display:flex;justify-content:flex-end"><button class="btn pri" data-act="rec-preparar">Preparar envio</button></div>
+    <p class="sub">${falta ? `<b>Escolha ${recado.destino === 'dia' ? 'o dia' : 'a fisioterapeuta'}</b> para ver quem recebe.` : `<b>${L.length}</b> ${L.length === 1 ? 'família' : 'famílias'}${fora.length ? ` · ${fora.length} sem permissão para dicas ficam de fora` : ''}.`}</p>
+    <div style="display:flex;justify-content:flex-end"><button class="btn pri" data-act="rec-preparar" ${falta ? 'disabled' : ''}>Preparar envio</button></div>
   </section>
-  <section class="panel pad"><h2>Enviados</h2><div class="list">${H.map(r => `<div class="row"><div class="main"><div class="name" style="font-weight:500">${esc(r.texto)}</div><div class="meta">${fmtD((r.em || '').slice(0, 10))} · ${esc(r.para)} · ${r.total} famílias</div></div><span class="chip ${r.tipo === 'conteudo' ? 'info' : 'mute'}">${r.tipo === 'conteudo' ? 'Dica' : 'Agenda'}</span></div>`).join('') || '<div class="empty">Nenhum recado ainda.</div>'}</div></section></div>`;
+  <section class="panel pad"><h2>Enviados</h2><div class="list">${H.map(r => `<div class="row"><div class="main"><div class="name" style="font-weight:500">${esc(r.texto)}</div><div class="meta">${fmtD(isoLocal(r.em))} · ${esc(r.para)} · ${r.total} famílias</div></div><span class="chip ${r.tipo === 'conteudo' ? 'info' : 'mute'}">${r.tipo === 'conteudo' ? 'Dica' : 'Agenda'}</span></div>`).join('') || '<div class="empty">Nenhum recado ainda.</div>'}</div></section></div>`;
 }
 function guardaRecado(){ const t = $('#recTexto'), d = $('#recDestino'), v = $('#recValor'); if (t) recado.texto = t.value; if (d) recado.destino = d.value; if (v) recado.valor = v.value; }
 document.addEventListener('change', e => { if (e.target.id === 'recDestino'){ guardaRecado(); recado.valor = ''; schedule(); } else if (e.target.id === 'recValor'){ guardaRecado(); schedule(); } });
@@ -141,10 +158,10 @@ function vPrivacidade(){
     <p style="margin-top:8px"><a class="btn" href="${LINK_AVISO}" target="_blank" rel="noopener">Abrir o aviso</a></p>
     <p class="sub" style="margin-top:12px">${semAviso ? `<span class="chip warn">${semAviso} pacientes ativos</span> ainda sem registro de que a família recebeu. Abra o paciente e toque em "Enviar aviso de privacidade".` : 'Todos os pacientes ativos já têm o aviso registrado.'}</p></div>`;
   if (abaPriv === 'lixeira'){ if (!lixeiraCache) carregarLixeira();
-    corpo = `<p class="sub">O que foi excluído sai das telas, mas continua guardado aqui. Dá para restaurar. Nada é apagado de vez pelo app.</p>
-    <section class="panel list" style="margin-top:10px">${!lixeiraCache ? '<div class="empty">Carregando…</div>' : lixeiraCache.filter(x => !(x.col === 'planos' && lixeiraCache.some(y => y.col === 'pacientes' && y.id === x.id))).map(x => `<div class="row"><div class="main"><div class="name">${esc(NOME_COL[x.col] || x.col)}: ${esc(x.data?.nome || x.data?.pnome || (x.data?.pid && S.pacientes[x.data.pid]?.nome) || x.id)}</div><div class="meta">Excluído em ${fmtD(String(x.em).slice(0, 10))} por ${esc(x.por || '')}</div></div><div class="acts"><button class="btn sm" data-act="lix-restaurar" data-id="${esc(x._id)}">Restaurar</button></div></div>`).join('') || '<div class="empty">A lixeira está vazia.</div>'}</section>`; }
+    corpo = `<p class="sub">O que foi excluído sai das telas, mas continua guardado aqui. Dá para restaurar. Nada é apagado de vez pelo app. Se já existir outro registro no lugar, o item fica na lixeira e o app avisa.</p>
+    <section class="panel list" style="margin-top:10px">${!lixeiraCache ? '<div class="empty">Carregando…</div>' : lixeiraCache.filter(x => !(x.col === 'planos' && lixeiraCache.some(y => y.col === 'pacientes' && y.id === x.id))).map(x => `<div class="row"><div class="main"><div class="name">${esc(NOME_COL[x.col] || x.col)}: ${esc(x.data?.nome || x.data?.pnome || (x.data?.pid && S.pacientes[x.data.pid]?.nome) || x.id)}</div><div class="meta">Excluído em ${fmtD(isoLocal(x.em))} por ${esc(x.por || '')}</div></div><div class="acts"><button class="btn sm" data-act="lix-restaurar" data-id="${esc(x._id)}">Restaurar</button></div></div>`).join('') || '<div class="empty">A lixeira está vazia.</div>'}</section>`; }
   if (abaPriv === 'registro'){ if (!registroCache) carregarRegistro();
-    corpo = `<p class="sub">Quem abriu, criou, mudou ou excluiu cada ficha (últimos 200). Ninguém consegue apagar este registro pelo app.</p>
+    corpo = `<p class="sub">Quem criou, mudou ou excluiu cada registro, e quem abriu fichas de paciente e avaliações pelo app (últimos 200). Ninguém consegue apagar este registro pelo app.</p>
     <section class="panel list" style="margin-top:10px">${!registroCache ? '<div class="empty">Carregando…</div>' : registroCache.map(r => `<div class="row"><div class="main"><div class="name" style="font-weight:500">${esc(r.email)} ${esc(ACAO_REG[r.acao] || r.acao)} ${esc((NOME_COL[r.col] || r.col || '').toLowerCase())}${r.resumo ? ': ' + esc(S.pacientes[r.resumo]?.nome || r.resumo) : ''}</div><div class="meta">${new Date(r.em).toLocaleString('pt-BR')}</div></div></div>`).join('') || '<div class="empty">Nada registrado ainda.</div>'}</section>
     <p><button class="btn sm" data-act="reg-atualizar">Atualizar</button></p>`; }
   if (abaPriv === 'copia') corpo = `<div class="panel pad"><p>Antes de qualquer mudança na forma como os dados são salvos, é feita uma cópia completa no próprio banco. Além disso, dá para baixar uma cópia a qualquer hora.</p>
@@ -158,10 +175,13 @@ function vPrivacidade(){
 async function dadosDoPaciente(pid){
   const p = stripId(S.pacientes[pid] || {}), pl = stripId(S.planos[pid] || {});
   const pega = async col => { try { const s = await db.collection(col).where('pid', '==', pid).get(); return s.docs.map(d => d.data()); } catch(e){ return []; } };
-  const [agenda, evolucoes, cobrancas, midias] = await Promise.all([pega('agenda'), pega('evolucoes'), pega('cobrancas'), pega('midias')]);
+  const [agenda, evolucoes, cobrancas, midias, grade, funil] = await Promise.all([pega('agenda'), pega('evolucoes'), pega('cobrancas'), pega('midias'), pega('grade'), pega('funil')]);
+  let lixeira = []; try { const s = await db.collection('lixeira').get(); lixeira = s.docs.map(d => d.data()).filter(x => x.id === pid || x.data?.pid === pid).map(x => ({ tipo: NOME_COL[x.col] || x.col, excluidoEm: x.em, dados: x.data })); } catch(e){}
   return { geradoEm: new Date().toISOString(), responsavelPelosDados: 'AP Fisioterapia Domiciliar', paciente: p, pacoteEContrato: pl,
     atendimentos: agenda.map(a => ({ data: a.data, hora: a.hora, fisio: a.fisio, situacao: a.status, obs: a.obs })),
     evolucoesEAvaliacoes: evolucoes, cobrancas, anexos: midias.map(m => ({ data: m.data, tipo: m.tipo, tamanho: m.tamanho })),
+    horariosFixos: grade.map(g => ({ dia: (DIAS_GRADE.find(x => x[0] === Number(g.dia)) || [])[1] || g.dia, hora: g.hora, fisio: g.fisio, ativo: g.ativo !== false })),
+    primeiroContato: funil.map(f => ({ data: f.data, origem: f.origem, medico: f.medico, obs: f.obs })), itensExcluidosGuardados: lixeira,
     aviso: 'Fotos e áudios do prontuário podem ser entregues à parte, a pedido.' };
 }
 
@@ -173,8 +193,8 @@ async function gestaoAcao(a, id, b){
     case 'rec-tipo': guardaRecado(); recado.tipo = b.dataset.v; return schedule();
     case 'rec-preparar': {
       guardaRecado(); if (!recado.texto.trim()) return toast('Escreva a mensagem');
-      const { L } = destinatariosRecado(); if (!L.length) return toast('Nenhuma família nesse grupo');
-      const para = recado.destino === 'todos' ? 'Todos os pacientes ativos' : recado.destino === 'fisio' ? 'Pacientes de ' + recado.valor : 'Quem é atendido ' + ['', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'][Number(recado.valor)];
+      const { L, falta } = destinatariosRecado(); if (falta) return toast(recado.destino === 'dia' ? 'Escolha o dia' : 'Escolha a fisioterapeuta'); if (!L.length) return toast('Nenhuma família nesse grupo');
+      const para = recado.destino === 'todos' ? 'Todos os pacientes ativos' : recado.destino === 'fisio' ? 'Pacientes de ' + recado.valor : 'Quem é atendido ' + fmtD(addDays(semanaRecado(), Number(recado.valor) - 1));
       await db.collection('recados').doc().set({ em: new Date().toISOString(), tipo: recado.tipo, para, texto: recado.texto, total: L.length });
       const d = $('#dlg');
       d.innerHTML = `<div class="dlg"><h2>Enviar recado</h2><p class="sub">Toque em cada família: o WhatsApp abre com a mensagem pronta e você só toca em enviar.</p>
@@ -187,7 +207,9 @@ async function gestaoAcao(a, id, b){
     case 'reg-atualizar': registroCache = null; return schedule();
     case 'lix-restaurar': return confirmBox('Restaurar este item? Ele volta para a tela de onde saiu.', async () => {
       const item = (lixeiraCache || []).find(x => x._id === id);
-      const { error } = await sb.rpc('restaurar_da_lixeira', { p_lid: id }); if (error) throw erroDb(error);
+      const { error } = await sb.rpc('restaurar_da_lixeira', { p_lid: id });
+      if (error && /ja_existe/.test(error.message || '')) { lixeiraCache = null; throw { code: 'já existe outro registro no lugar deste. Nada foi apagado: o item continua na lixeira' }; }
+      if (error) throw erroDb(error);
       // paciente volta junto com o pacote dele
       if (item && item.col === 'pacientes'){ const pl = lixeiraCache.find(x => x.col === 'planos' && x.id === item.id); if (pl) await sb.rpc('restaurar_da_lixeira', { p_lid: pl._id }); }
       lixeiraCache = null; toast('Restaurado'); });
@@ -195,6 +217,9 @@ async function gestaoAcao(a, id, b){
     case 'pac-dados': { const p = S.pacientes[id]; const j = await dadosDoPaciente(id); baixar(`dados-paciente-${today()}.json`, new Blob([JSON.stringify(j, null, 2)], { type: 'application/json' })); registrarAcesso('pacientes', id, 'cópia dos dados'); return toast('Arquivo baixado. Mande para a família por um canal seguro.'); }
     case 'pac-aviso': { const p = S.pacientes[id]; const msg = `Olá, ${(p.responsavel || '').split(' ')[0] || 'tudo bem'}! Aqui é da AP Fisioterapia. Este é o nosso aviso de privacidade, com os dados que guardamos sobre ${p.nome.split(' ')[0]} e por quê: ${LINK_AVISO}. Qualquer dúvida, é só falar com a gente por aqui.`;
       const link = waLink(p.telefone, msg); if (!link) return toast('Cadastre o WhatsApp do responsável');
-      window.open(link, '_blank', 'noopener'); await db.doc('pacientes/' + id).update({ privAvisoEm: today() }); if ($('#dlg').open) $('#dlg').close(); return toast('Aviso registrado como enviado hoje'); }
+      window.open(link, '_blank', 'noopener');
+      try { await db.doc('pacientes/' + id).update({ privAvisoEm: today() }); } catch(e){ return toast('O WhatsApp abriu, mas não consegui registrar o envio. Toque de novo depois de mandar.'); }
+      const f = $('#f_privAvisoEm'); if (f) f.value = today();
+      return toast('Aviso registrado como enviado hoje'); }
   }
 }

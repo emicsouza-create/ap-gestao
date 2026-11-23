@@ -76,7 +76,7 @@ function textoContrato(p, pl, C){
     ['p', `6.1 Pelos serviços prestados, o Contratante pagará à Contratada o valor de ${valor ? brl(valor) + ' (' + reaisExtenso(valor) + ')' : 'R$ ____________ (________________________________)'}, referente a:`],
     ['i', `(${freq ? '  ' : '  '}) sessão única;`],
     ['i', `(${freq ? 'X' : '  '}) pacote mensal com ${freq || '____'} sessões por semana (frequência combinada: ${freq || '____'} vezes por semana).`],
-    ['p', `6.2 O pagamento do pacote mensal deverá ser feito entre os dias 10 e ${C.vencDia || 15} de cada mês, por ${forma}, conforme os dados informados pela Contratada.`],
+    ['p', `6.2 O pagamento do pacote mensal deverá ser feito ${(Number(pl.vencDia) || C.vencDia || 15) > 10 ? `entre os dias 10 e ${Number(pl.vencDia) || C.vencDia || 15}` : `até o dia ${Number(pl.vencDia) || C.vencDia || 15}`} de cada mês, por ${forma}, conforme os dados informados pela Contratada.`],
     ['p', `6.3 O atraso no pagamento sujeita o Contratante a multa de ${pctExtenso(C.multa)} sobre o valor devido, juros de ${pctExtenso(C.juros)} ao mês e correção monetária pelo índice IPCA.`],
     ['p', '6.4 O valor será reajustado a cada 12 (doze) meses, contados do início do contrato, pelo índice IPCA, ou por outro percentual acordado por escrito. Mudanças na frequência semanal ou na complexidade do atendimento poderão motivar nova proposta de valor, a ser acordada entre as partes.'],
     ['p', '6.5 Quando parte do valor for paga diretamente por plano de saúde ou por terceiro, o Contratante permanece responsável pela parcela não coberta e por qualquer valor que o plano ou o terceiro deixe de pagar, salvo ajuste diverso por escrito.'],

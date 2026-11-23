@@ -25,7 +25,7 @@ function ditar(alvo, btn, opts = {}){
     rec.onresult = e => {
       let txt = ''; for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
       const alvoEl = document.getElementById(alvo); if (!alvoEl) return pararDitado();
-      st.mudo = 0;
+      st.mudo = 0; st.ouviu = true;
       if (ce){ // campo formatado: o texto falado entra no fim, sem mexer na formatação que já existe
         if (!st.node || !alvoEl.contains(st.node)){ const ult = alvoEl.lastElementChild && /^(DIV|P|BLOCKQUOTE|LI)$/.test(alvoEl.lastElementChild.tagName) ? alvoEl.lastElementChild : alvoEl;
           st.sep = (alvoEl.textContent || '').trim() ? ' ' : ''; st.node = document.createTextNode(''); ult.appendChild(st.node); }
@@ -42,7 +42,10 @@ function ditar(alvo, btn, opts = {}){
       if (er === 'not-allowed' || er === 'service-not-allowed'){ pararDitado(); return falha('A transcrição foi bloqueada. Libere o microfone para este app nas configurações do celular.'); }
       if (er === 'audio-capture'){ pararDitado(); return falha('O microfone está ocupado e a transcrição não ligou.'); }
       if (er === 'network'){ pararDitado(); return falha('A transcrição precisa de internet.'); }
-      if (er === 'no-speech' && ++st.mudo >= 4){ pararDitado(); return opts.onFalha ? null : toast('Parei de ouvir porque ninguém falou.'); }
+      if (er === 'aborted'){ pararDitado(); return; }
+      // sessão que terminou sem ouvir nada conta como silêncio (no iPhone ela termina sem erro): evita reiniciar sem parar
+      const ouviu = st.ouviu; st.ouviu = false;
+      if (!ouviu && ++st.mudo >= 4){ pararDitado(); return opts.onFalha ? null : toast('Parei de ouvir porque ninguém falou.'); }
       try { st.rec = nova(); st.rec.start(); } catch(err){ pararDitado(); }
     };
     return rec;
@@ -86,7 +89,9 @@ function avPacientes(){
   else Object.values(S.pacientes).filter(p => p.status !== 'inativo').forEach(p => m.set(p.nome, { nome: p.nome, pid: p._id }));
   return [...m.values()].sort((a, b) => a.nome.localeCompare(b.nome));
 }
-let avT = null, avLista = null, avAtual = null, avCarregando = false;
+let avT = null, avLista = null, avAtual = null, avCarregando = false, avChave = 'ap.avDraft.livre';
+// rascunho antigo sem dono (versões anteriores usavam uma chave só para toda avaliação nova)
+try { localStorage.removeItem('ap.avDraft.novo'); } catch(e){}
 const num = s => { const n = Number(String(s ?? '').replace(',', '.')); return s === '' || s == null || !isFinite(n) ? null : n; };
 const fmtNum = (n, c = 1) => n == null ? '' : n.toLocaleString('pt-BR', { maximumFractionDigits: c });
 const rotulo = (L, k) => (L.find(x => x[0] === k) || [k, k])[1];
@@ -100,7 +105,9 @@ function avIdade(v){
   const [a, m, d] = v.nasc.split('-').map(Number), [A, M, D] = ref.split('-').map(Number);
   let i = A - a; if (M < m || (M === m && D < d)) i--; return i >= 0 && i < 130 ? i : null;
 }
-const avCtx = v => ({ sexo: v.sexo || '', idade: avIdade(v), alt: num(v.altura), peso: num(v.massa), cint: num(v.cintura) });
+// altura escrita em metros (1,70) é convertida para centímetros
+const altCm = a => a != null && a > 0.5 && a < 3 ? a * 100 : a;
+const avCtx = v => ({ sexo: v.sexo || '', idade: avIdade(v), alt: altCm(num(v.altura)), peso: num(v.massa), cint: num(v.cintura) });
 const AV_PRECISA = { sexo: 'sexo', idade: 'data de nascimento', alt: 'altura', peso: 'massa', cint: 'circunferência da cintura (bloco 3)' };
 // equações de valor predito
 const AV_REF = {
@@ -169,7 +176,8 @@ function classifica(val, def){ let r = null; def.cortes.forEach(([c, l, gt]) => 
 function avCalc(v){
   const c = avCtx(v), out = { idade: c.idade, testes: {} };
   if (c.alt && c.peso){ const imc = c.peso / Math.pow(c.alt / 100, 2), ref = imcRef(c.idade);
-    out.imc = { valor: imc, cls: classifica(imc, ref), fonte: ref.fonte, def: ref, aviso: c.idade == null ? 'sem data de nascimento: usada a tabela de adultos' : '' }; }
+    const conf = [num(v.altura) !== c.alt ? 'altura lida em metros e convertida para ' + fmtNum(c.alt, 0) + ' cm' : '', c.alt < 100 || c.alt > 230 ? 'confira a altura (em cm)' : '', c.peso < 20 || c.peso > 300 ? 'confira a massa (em kg)' : ''].filter(Boolean);
+    out.imc = { valor: imc, cls: classifica(imc, ref), fonte: ref.fonte, def: ref, aviso: [c.idade == null ? 'sem data de nascimento: usada a tabela de adultos' : '', ...conf].filter(Boolean).join(' · ') }; }
   const ci = num(v.cintura), qu = num(v.quadril); if (ci && qu) out.rcq = ci / qu;
   AV_GRUPOS.forEach(G => G.itens.forEach(([id, , , temPred, tipo]) => {
     if (tipo === 'txt') return;
@@ -183,7 +191,8 @@ function avCalc(v){
     } else if (id === 'preensao' && avMaos(v).lista.length){ Object.assign(t, avPreensao(v, c)); if (t.pred == null){ const p = num(v[`t_${id}_p`]); if (p){ t.pred = p; t.manual = true; } } }
     else if (temPred){ const p = num(v[`t_${id}_p`]); if (p) t.pred = p; }
     if (r != null && t.pred > 0){ t.pct = r / t.pred * 100; if (t.lin != null) t.abaixoLin = r < t.lin; }
-    if (C && r != null){ t.cls = classifica(r, C); t.fonteCls = C.fonte; }
+    // pontuação fora da escala não é classificada (ex.: SPPB vai de 0 a 12)
+    if (C && r != null){ if (r < C.min || r > C.max){ t.cls = `valor fora da escala (${C.min} a ${C.max}): confira`; t.foraEscala = true; } else { t.cls = classifica(r, C); t.fonteCls = C.fonte; } }
     if (Object.keys(t).length) out.testes[id] = t;
   }));
   return out;
@@ -200,7 +209,7 @@ function vAvaliacoes(){
   const L = avLista.slice().sort((a, b) => (b.av?.quando || b.data || '').localeCompare(a.av?.quando || a.data || ''));
   const rasc = L.filter(x => x.status !== 'finalizada').length;
   return `<div class="head"><div><h1>Avaliações</h1><p class="sub">${rasc ? `${rasc} em rascunho. ` : ''}Toque numa avaliação para continuar ou baixar o PDF.</p></div></div>
-  <section class="panel list">${L.length ? L.map(x => `<button class="irow" data-act="av-edit" data-id="${x._id}"><span class="tx"><span class="t">${esc(x.pnome || 'Sem nome')}</span>
+  <section class="panel list">${L.length ? L.map(x => `<button class="irow" data-act="av-edit" data-id="${esc(x._id)}"><span class="tx"><span class="t">${esc(x.pnome || 'Sem nome')}</span>
     <span class="m">${esc([fmtD(x.data), x.fisio ? x.fisio.split(' ')[0] : '', AV_FICHAS[x.av?.ficha]?.nome || ''].filter(Boolean).join(' · '))}</span></span>
     <span class="r"><span class="chip ${x.status === 'finalizada' ? 'ok' : 'warn'}">${x.status === 'finalizada' ? 'Finalizada' : 'Rascunho'}</span></span>${ICON.chev}</button>`).join('')
     : '<div class="empty">Nenhuma avaliação ainda. Toque em "Avaliação" para começar.</div>'}</section>`;
@@ -240,14 +249,19 @@ function avTeste([id, nome, un, pred, tipo]){
       : pred ? avIn(`t_${id}_p`, 'Predito' + (un ? ` (${un})` : ''), { t: 'number' }) + `<label>% do predito<output id="pc_${id}" class="calc">—</output></label>` : '')
     + (AV_CLS[id] ? `<label class="full">Classificação<output id="cl_${id}" class="calc">—</output></label><p class="ref full">${esc(AV_CLS[id].fonte)}</p>` : '')
     + avTx(`t_${id}_o`, 'Observações', { rows: 2 });
-  return `<details class="tst" data-t="${id}"><summary><span class="nm">${esc(nome)}</span>${selo}</summary><div class="form">${corpo}</div></details>`;
+  return `<details class="tst" data-t="${esc(id)}"><summary><span class="nm">${esc(nome)}</span>${selo}</summary><div class="form">${corpo}</div></details>`;
 }
 function avSecao(n, titulo, corpo, cls){
   return `<details class="avsec ${cls || ''}" data-s="${n}" open><summary><span class="nm">${n}. ${esc(titulo)}</span>${selo}</summary><div class="form">${corpo}</div></details>`;
 }
-function avForm(id, base){
+async function avForm(id, base){
   pararDitado(); clearTimeout(avT);
-  avAtual = id ? JSON.parse(JSON.stringify(avLista.find(x => x._id === id) || {})) : Object.assign({ status: 'rascunho', av: {} }, base || {});
+  let salvo = id ? (avLista || []).find(x => x._id === id) : null;
+  // abre sempre a versão mais nova do banco (outra pessoa pode ter mexido)
+  if (id){ try { const s = await db.doc('evolucoes/' + id).get(); if (s.exists) salvo = Object.assign({ _id: id }, s.data()); } catch(e){ if (!salvo) return toast('Não consegui abrir a avaliação. Tente de novo.'); } }
+  avAtual = id ? JSON.parse(JSON.stringify(salvo || {})) : Object.assign({ status: 'rascunho', av: {} }, base || {});
+  // cada avaliação nova tem o próprio rascunho, ligado ao atendimento de onde ela foi aberta
+  avChave = 'ap.avDraft.' + (id || ('novo-' + (base?.agId || 'livre')));
   if (id) registrarAcesso('evolucoes', id, avAtual.pnome || '');
   if (!avAtual.av) avAtual.av = {};
   if (!id && !avAtual.av.quando) avAtual.av.quando = today() + 'T' + new Date().toTimeString().slice(0, 5);
@@ -256,13 +270,15 @@ function avForm(id, base){
   if (!avAtual.av.fisio) avAtual.av.fisio = avAtual.fisio || (restrito() ? minhaFisio : '');
   // rascunho que ficou só neste celular (o app fechou antes de salvar)
   let recuperado = false;
-  try { const r = JSON.parse(localStorage.getItem('ap.avDraft.' + (id || 'novo')) || 'null'); if (r && r.av && (!id || (r.em || '') > (avAtual.alteradoEm || avAtual.criadoEm || ''))) { avAtual.av = r.av; recuperado = true; } } catch(e){}
+  try { const r = JSON.parse(localStorage.getItem(avChave) || 'null'); const recente = r && (Date.now() - new Date(r.em || 0).getTime()) < 3 * 86400000;
+    if (r && r.av && recente && (!id || (r.em || '') > (avAtual.alteradoEm || avAtual.criadoEm || ''))) { avAtual.av = r.av; recuperado = true; }
+    else if (r && !recente) localStorage.removeItem(avChave); } catch(e){}
   const ro = !canWrite, fin = avAtual.status === 'finalizada';
   const pacs = avPacientes().map(p => p.nome);
   const d = $('#dlg');
   d.innerHTML = `<div class="dlg av"><h2>${id ? 'Avaliação · ' + esc(avAtual.pnome || '') : 'Nova avaliação'}</h2>
     ${recuperado ? '<p class="sub" style="margin:0;color:var(--warn)">Recuperei o que estava digitado e não foi salvo.</p>' : ''}
-    ${fin ? `<p class="sub" style="margin:0">Finalizada${avAtual.finalizadaEm ? ' em ' + fmtD(avAtual.finalizadaEm.slice(0, 10)) : ''}. Se alterar, salve de novo para atualizar o PDF.</p>` : '<p class="sub" style="margin:0">Os campos com * são obrigatórios para finalizar. Toque em "Falar" para ditar em qualquer campo de texto.</p>'}
+    ${fin ? `<p class="sub" style="margin:0">Finalizada${avAtual.finalizadaEm ? ' em ' + fmtD(isoLocal(avAtual.finalizadaEm)) : ''}. Se alterar, salve de novo para atualizar o PDF.</p>` : '<p class="sub" style="margin:0">Os campos com * são obrigatórios para finalizar. Toque em "Falar" para ditar em qualquer campo de texto.</p>'}
     <form id="avForm" onsubmit="return false">
     <datalist id="avPacs">${pacs.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
     ${avSecao(1, 'Dados principais',
@@ -296,8 +312,8 @@ function avForm(id, base){
       avTx('diagfisio', 'Diagnóstico fisioterapêutico', { rows: 4 }) + avTx('objetivos', 'Objetivos terapêuticos', { rows: 3 }) + avTx('conclusao', 'Conclusão', { rows: 4 }))}
     </form>
     <p class="sub" id="avMsg" style="margin:0;color:var(--bad)" hidden></p>
-    <div class="foot">${id && isAdmin ? `<button type="button" class="btn ghost" data-act="av-del" data-id="${id}">Excluir</button>` : ''}
-      ${fin ? `<button type="button" class="btn" data-act="av-pdf" data-id="${id}">${ICON.pdf}Baixar PDF</button>` : ''}<span class="sp"></span>
+    <div class="foot">${id && isAdmin ? `<button type="button" class="btn ghost" data-act="av-del" data-id="${esc(id)}">Excluir</button>` : ''}
+      ${fin ? `<button type="button" class="btn" data-act="av-pdf" data-id="${esc(id)}">${ICON.pdf}Baixar PDF</button>` : ''}<span class="sp"></span>
       <button type="button" class="btn" data-act="close">Fechar</button>
       ${ro ? '' : `<button type="button" class="btn" data-act="av-salvar">Salvar rascunho</button><button type="button" class="btn pri" data-act="av-final">${fin ? 'Salvar e gerar PDF' : 'Finalizar e gerar PDF'}</button>`}</div></div>`;
   if (ro){ d.querySelectorAll('#avForm input,#avForm select,#avForm textarea').forEach(el => el.disabled = true); d.querySelectorAll('#avForm .rt').forEach(el => el.setAttribute('contenteditable', 'false')); d.querySelectorAll('#avForm .rt-bar').forEach(el => el.remove()); }
@@ -358,7 +374,7 @@ function avAtualizar(semRascunho){
     const n = s.dataset.s; const ok = n === '1' ? ['pnome','quando','fisio','situacao','sexo','ficha'].every(k => v[k]) : n === '3' ? !!(v.altura && v.massa) : n === '5' ? !!(v.diagfisio && v.objetivos) : tem(s);
     sl.hidden = !ok; });
   const cnt = $('#avCnt'); if (cnt) cnt.textContent = nTestes ? nTestes + (nTestes > 1 ? ' testes preenchidos' : ' teste preenchido') : 'nenhum teste preenchido';
-  if (!semRascunho){ clearTimeout(avT); avT = setTimeout(() => { try { localStorage.setItem('ap.avDraft.' + (avAtual._id || 'novo'), JSON.stringify({ av: avLer(), em: new Date().toISOString() })); } catch(e){} }, 400); }
+  if (!semRascunho){ clearTimeout(avT); avT = setTimeout(() => { try { localStorage.setItem(avChave, JSON.stringify({ av: avLer(), em: new Date().toISOString() })); } catch(e){} }, 400); }
 }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#avForm')) avAtualizar(); });
 document.addEventListener('change', e => { if (e.target.closest && e.target.closest('#avForm')) avAtualizar(); });
@@ -375,7 +391,7 @@ async function avSalvar(finalizar){
     criadoEm: avAtual.criadoEm || agora, alteradoEm: avAtual._id ? agora : '', finalizadaEm: finalizar ? agora : (avAtual.finalizadaEm || '') };
   try {
     await db.doc('evolucoes/' + id).set(doc); clearTimeout(avT);
-    try { localStorage.removeItem('ap.avDraft.' + (avAtual._id || 'novo')); } catch(e){}
+    try { localStorage.removeItem(avChave); } catch(e){}
     const x = Object.assign({ _id: id }, doc); avLista = (avLista || []).filter(y => y._id !== id).concat([x]);
     if (finalizar && doc.agId && S.agenda[doc.agId] && (S.agenda[doc.agId].status || 'agendado') === 'agendado') { try { await db.doc('agenda/' + doc.agId).update({ status: 'feito' }); } catch(e){} }
     $('#dlg').close(); schedule();
