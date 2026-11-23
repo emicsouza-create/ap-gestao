@@ -18,7 +18,7 @@ function extenso(n){
   const mi = Math.floor(n / 1000000), mil = Math.floor((n % 1000000) / 1000), r = n % 1000;
   const partes = [];
   if (mi) partes.push(mi === 1 ? 'um milhão' : ate999(mi) + ' milhões');
-  if (mil) partes.push(mil === 1 ? 'mil' : ate999(mil) + ' mil');
+  if (mil) partes.push((mi && !r && (mil < 100 || mil % 100 === 0) ? 'e ' : '') + (mil === 1 ? 'mil' : ate999(mil) + ' mil'));
   if (r) partes.push(((mi || mil) && (r < 100 || r % 100 === 0) ? 'e ' : '') + ate999(r));
   return partes.join(' ');
 }

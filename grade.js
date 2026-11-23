@@ -17,9 +17,10 @@ function vGrade(){
   return `<div class="head"><div><h1>${restrito() ? 'Minha grade' : 'Grade da semana'}</h1><p class="sub">Horários fixos de cada paciente. ${restrito() ? 'Só a sua grade aparece aqui.' : 'Toque num horário para mudar o paciente, o dia, a hora ou quem atende.'}</p></div><span class="sp"></span>
     ${isAdmin ? `<button class="btn pri" data-act="grade-novo">Novo horário</button>` : ''}</div>
   ${!restrito() ? `<div class="seg"><button data-act="grade-fisio" data-v="" aria-pressed="${!gradeFisio}">Todas</button>${fisios().map(f => `<button data-act="grade-fisio" data-v="${esc(f)}" aria-pressed="${gradeFisio === f}">${esc(f.split(' ')[0])}</button>`).join('')}${nInat ? `<button data-act="grade-inativos" aria-pressed="${gradeInativos}">Mostrar ${nInat} desativado${nInat > 1 ? 's' : ''}</button>` : ''}</div>` : ''}
-  ${isAdmin ? `<section class="panel pad" style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Lançar na agenda</b><span class="sp"></span>
-    <button class="btn sm ghost" data-act="grade-sem" data-v="-7" aria-label="Semana anterior">‹</button><span>semana de ${fmtD(semanaLancar())}</span><button class="btn sm ghost" data-act="grade-sem" data-v="7" aria-label="Próxima semana">›</button>
-    <button class="btn sm" data-act="grade-lancar">Lançar esta semana</button></section>` : ''}
+  ${isAdmin ? `<section class="panel pad" style="margin-bottom:12px"><b>Lançar na agenda</b>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+      <div style="display:flex;align-items:center;gap:4px"><button class="btn sm ghost" data-act="grade-sem" data-v="-7" aria-label="Semana anterior">‹</button><span style="white-space:nowrap">semana de ${fmtD(semanaLancar())}</span><button class="btn sm ghost" data-act="grade-sem" data-v="7" aria-label="Próxima semana">›</button></div>
+      <span class="sp"></span><button class="btn sm pri" data-act="grade-lancar">Lançar esta semana</button></div></section>` : ''}
   <div class="semana">${DIAS_GRADE.map(([d, nome]) => { const L = G.filter(g => Number(g.dia) === d).sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
     if (d === 6 && !L.length) return '';
     return `<div class="dia"><h3>${nome} <span class="chip mute">${L.filter(gradeOcupa).length}</span></h3>

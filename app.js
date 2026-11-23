@@ -56,8 +56,10 @@ function baixar(nome, blob){
 }
 async function baixarBackup(){
   const cols = ['pacientes','planos','cobrancas','agenda','evolucoes','midias','funil','equipe','equipamentos','datas','config','liberados','recados','lixeira','grade'];
-  const out = {};
-  for (const c of cols){ try { const s = await db.collection(c).get(); out[c] = {}; s.docs.forEach(d => out[c][d.id] = d.data()); } catch(e){} }
+  const out = {}, falhou = [];
+  for (const c of cols){ try { const s = await db.collection(c).get(); out[c] = {}; s.docs.forEach(d => out[c][d.id] = d.data()); } catch(e){ falhou.push(c); } }
+  // avisa se alguma parte não veio (antes a cópia saía incompleta sem aviso)
+  if (falhou.length) toast('Atenção: a cópia saiu SEM ' + falhou.join(', ') + '. Confira a internet e baixe de novo.');
   baixar(`backup-ap-gestao-${today()}.json`, new Blob([JSON.stringify({ formato: 'ap-gestao-backup-1', exportadoEm: today(), colecoes: out }, null, 1)], { type: 'application/json' }));
 }
 async function importarBackup(file){
@@ -65,9 +67,16 @@ async function importarBackup(file){
     const j = JSON.parse(await file.text()); const C = j.colecoes || {};
     const rows = []; Object.entries(C).forEach(([col, docs]) => Object.entries(docs).forEach(([id, data]) => rows.push({ col, id, data })));
     if (!rows.length) return toast('O arquivo não tem dados');
-    confirmBox(`Importar ${rows.length} registros (${Object.entries(C).map(([c, d]) => c + ': ' + Object.keys(d).length).join(', ')})?`, async () => {
-      for (let i = 0; i < rows.length; i += 200){ const { error } = await sb.from('docs').upsert(rows.slice(i, i + 200)); if (error) throw erroDb(error); }
-      toast(rows.length + ' registros importados'); setTimeout(() => location.reload(), 800);
+    // importar nunca escreve por cima do que já existe: só traz o que está faltando
+    const existe = new Set();
+    for (const col of Object.keys(C)){ try { const s = await db.collection(col).get(); s.docs.forEach(d => existe.add(col + '/' + d.id)); } catch(e){ return toast('Não consegui conferir o que já existe (' + col + '). Nada foi importado.'); } }
+    const novos = rows.filter(r => !existe.has(r.col + '/' + r.id));
+    if (!novos.length) return toast('Tudo deste arquivo já está no app. Nada foi alterado.');
+    confirmBox(`Trazer ${novos.length} registros que estão faltando? Os ${rows.length - novos.length} que já existem no app não são alterados.`, async () => {
+      let feitos = 0;
+      try { for (let i = 0; i < novos.length; i += 200){ const { error } = await sb.from('docs').insert(novos.slice(i, i + 200)); if (error) throw erroDb(error); feitos += Math.min(200, novos.length - i); } }
+      catch(err){ return toast(`Parou no meio: ${feitos} de ${novos.length} importados (${err?.code || 'erro'}). Pode importar o mesmo arquivo de novo: ele continua de onde parou.`); }
+      toast(feitos + ' registros importados'); setTimeout(() => location.reload(), 800);
     });
   } catch(e){ toast('Arquivo inválido'); }
 }
@@ -711,7 +720,7 @@ function vAcessos(){
   </div></section>
   <section style="margin-bottom:20px"><h2>Cópia de segurança</h2><div class="panel list">
     <div class="row"><div class="main"><div class="name">Baixar todos os dados</div><div class="meta">Arquivo .json com pacientes, valores, cobranças, agenda e evoluções em texto. Fotos e áudios ficam no banco.</div></div><div class="acts"><button class="btn sm" data-act="backup-baixar">Baixar</button></div></div>
-    <div class="row"><div class="main"><div class="name">Importar dados de um arquivo</div><div class="meta">Use para trazer o backup do app antigo. Registros com o mesmo código são substituídos.</div></div><div class="acts"><label class="btn sm" for="bkArq">Escolher arquivo</label><input id="bkArq" type="file" accept="application/json,.json" hidden></div></div>
+    <div class="row"><div class="main"><div class="name">Importar dados de um arquivo</div><div class="meta">Traz de uma cópia só o que está faltando no app. O que já existe aqui não é alterado.</div></div><div class="acts"><label class="btn sm" for="bkArq">Escolher arquivo</label><input id="bkArq" type="file" accept="application/json,.json" hidden></div></div>
   </div></section>`;
 }
 
@@ -902,11 +911,13 @@ function openForm(title, fields, vals, onSave, extra){
   d.showModal();
   $('#frm').onsubmit = async e => {
     e.preventDefault();
+    // segundo toque em "Salvar" enquanto o primeiro ainda grava é ignorado (não cria em dobro)
+    const fm = e.target; if (fm.dataset.salvando) return; fm.dataset.salvando = '1'; setTimeout(() => delete fm.dataset.salvando, 4000);
     const out = {};
     fields.forEach(f => { if (f.sec) return; const el = $('#f_'+f.k); if (!el || el.disabled) return;
       out[f.k] = f.t==='multi' ? [...el.querySelectorAll('input:checked')].map(i => i.value) : f.t==='check' ? el.checked : f.t==='number' ? (el.value===''? null : Number(el.value)) : el.value.trim(); });
     try { await onSave(out); d.close(); toast('Salvo'); schedule(); }
-    catch(err){ const m = $('#frmErr'); m.hidden = false; if (err?.aviso){ m.textContent = err.aviso; return; } m.textContent = 'Não foi possível salvar (' + (err?.code||'erro') + '). ' + (err?.code==='invalid_argument' ? 'Seu acesso pode ser só de leitura nesta parte.' : 'Tente de novo em alguns segundos.'); }
+    catch(err){ delete fm.dataset.salvando; const m = $('#frmErr'); m.hidden = false; if (err?.aviso){ m.textContent = err.aviso; return; } m.textContent = 'Não foi possível salvar (' + (err?.code||'erro') + '). ' + (err?.code==='invalid_argument' ? 'Seu acesso pode ser só de leitura nesta parte.' : 'Tente de novo em alguns segundos.'); }
   };
 }
 function openMsg(title, text, extraBtns){
@@ -922,12 +933,16 @@ function confirmBox(text, onYes){
 }
 
 // ---------- ações ----------
+const cliqueOcupado = new Set();
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-tab],[data-act]'); if (!b) return;
   if (b.dataset.tab){ tab = b.dataset.tab; if (dlgOpen()) $('#dlg').close(); schedule(); window.scrollTo(0,0); return; }
   if (b.dataset.act === 'toast-undo'){ const f = toast.undo; $('#toast').hidden = true; toast.undo = null; if (f) { try { await f(); } catch(err){ toast('Não foi possível desfazer'); } } return; }
   const a = b.dataset.act, id = b.dataset.id;
   if (a === 'close') return closeDlg();
+  // toque duplo rápido não cria nada em dobro
+  if (/^(ag-(feito|undo|copy)|cob-(gen|pay|msg-env)|nf-marcar|grade-lancar|rec-(preparar|ok)|pac-(aviso|inat)|lib-|pedir|evo-save|av-|lix-restaurar|fun-(conv|next)|sum-contato|lg-criar)/.test(a)){
+    const trava = a + '|' + (id || ''); if (cliqueOcupado.has(trava)) return; cliqueOcupado.add(trava); setTimeout(() => cliqueOcupado.delete(trava), 1500); }
   if (a === 'copy-msg') return copy($('#msgTxt').textContent, 'Mensagem copiada');
   if (!db) return;
   const comAviso = async f => { try { return await f(); } catch(err){ toast('Não foi possível (' + (err?.code || err?.message || 'erro') + '). Tente de novo.'); } };
@@ -944,7 +959,10 @@ document.addEventListener('click', async e => {
     case 'evo-save': return evoSave(id);
     case 'midia-del': { const ok = b.dataset.ok; if (!ok){ b.dataset.ok = '1'; b.textContent = 'Toque de novo para apagar'; return; } return apagarMidia(id); }
     case 'evo-midias': { b.remove(); return carregarMidias(id, document.getElementById('hm-' + id)); }
-    case 'pac-del': return confirmBox(`Excluir ${pacNome(id)}? Ele sai das telas e vai para a lixeira (dá para restaurar em Privacidade). Se o tratamento acabou, prefira mudar a situação para "Alta".`, async () => { await db.doc('pacientes/'+id).delete(); if (isAdmin) await db.doc('planos/'+id).delete(); });
+    case 'pac-del': return confirmBox(`Excluir ${pacNome(id)}? Ele sai das telas e vai para a lixeira (dá para restaurar em Privacidade). Se o tratamento acabou, prefira mudar a situação para "Alta".`, async () => { await db.doc('pacientes/'+id).delete(); if (isAdmin) await db.doc('planos/'+id).delete();
+      // horários fixos e atendimentos futuros ainda não feitos também vão para a lixeira (não ficam soltos na agenda)
+      for (const g of Object.values(S.grade || {}).filter(g => g.pid === id)) await db.doc('grade/'+g._id).delete();
+      for (const a of Object.values(S.agenda).filter(a => a.pid === id && a.data >= today() && (a.status || 'agendado') === 'agendado')) await db.doc('agenda/'+a._id).delete(); });
     case 'fun-new': return openForm('Novo contato', funFields(), {etapa:'indicacao', origem:'medico', data: today()}, async d => { await db.collection('funil').doc().set(d); });
     case 'fun-edit': return openForm(S.funil[id].nome, funFields(), S.funil[id], async d => { await mesclar('funil/'+id, mudou(d, S.funil[id])); }, [['Excluir','fun-del',id]]);
     case 'fun-del': return confirmBox('Excluir este contato da entrada?', () => db.doc('funil/'+id).delete());
@@ -963,7 +981,9 @@ document.addEventListener('click', async e => {
     case 'ag-new': return agForm(null);
     case 'ag-edit': return agForm(id);
     case 'ag-feito': { if (dlgOpen()) $('#dlg').close(); const ant = S.agenda[id]?.status || 'agendado'; if (S.agenda[id]) { S.agenda[id].status = 'feito'; schedule(); }
-      await db.doc('agenda/'+id).update({status:'feito', feitoEm: new Date().toISOString()});
+      // se não salvar, desfaz na tela e avisa (antes ficava "realizado" só na tela)
+      try { await db.doc('agenda/'+id).update({status:'feito', feitoEm: new Date().toISOString()}); }
+      catch(err){ if (S.agenda[id]) { S.agenda[id].status = ant; schedule(); } return toast('Não salvou (' + (err?.code || 'sem internet') + '). Toque de novo.'); }
       return toast((S.agenda[id]?.pnome || 'Atendimento') + ' · realizado', async () => { if (S.agenda[id]) { S.agenda[id].status = ant; schedule(); } await db.doc('agenda/'+id).update({status: ant}); }); }
     case 'ag-sheet': return agSheet(id);
     case 'cob-sheet': return cobSheet(id);
