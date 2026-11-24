@@ -1169,6 +1169,15 @@ function telaLogin(msg){
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" type="button" data-act="lg-criar">Criar minha conta</button><button class="btn ghost" type="button" data-act="lg-esqueci">Esqueci a senha</button></div>
   </form>`;
 }
+// mensagens do login em português
+const erroLogin = e => { const t = (e?.message || '') + ' ' + (e?.code || '');
+  if (/security purposes|rate limit|too many|over_email_send_rate|over_request_rate/i.test(t)) return 'Muitas tentativas seguidas. Espere 1 minuto e tente de novo (só uma vez).';
+  if (/already registered|already exists|user_already_exists/i.test(t)) return 'Esse e-mail já tem conta. Toque em Entrar. Se não lembrar a senha, toque em Esqueci a senha.';
+  if (/invalid login|invalid_credentials|Invalid/i.test(t)) return 'E-mail ou senha incorretos. Se não lembrar a senha, toque em Esqueci a senha.';
+  if (/confirm/i.test(t)) return 'Falta confirmar o e-mail: abra o e-mail do app (veja também o spam) e toque no link. Depois toque em Entrar.';
+  if (/password/i.test(t)) return 'A senha precisa ter pelo menos 6 caracteres.';
+  if (/fetch|network/i.test(t)) return 'Sem conexão com a internet. Confira e tente de novo.';
+  return e?.message || 'Não foi possível. Tente de novo.'; };
 async function loginAcao(tipo){
   const email = $('#lgEmail').value.trim(), senha = $('#lgSenha').value, m = $('#lgMsg');
   const erro = t => { m.hidden = false; m.style.color = 'var(--bad)'; m.textContent = t; };
@@ -1176,17 +1185,17 @@ async function loginAcao(tipo){
   if (!email) return erro('Digite o e-mail.');
   if (tipo === 'esqueci'){
     const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
-    return error ? erro('Não foi possível enviar: ' + error.message) : ok('Enviamos um link para criar uma senha nova. Confira o e-mail.');
+    return error ? erro(erroLogin(error)) : ok('Enviamos um link para criar uma senha nova. Confira o e-mail (e o spam).');
   }
   if (!senha || senha.length < 6) return erro('A senha precisa ter pelo menos 6 caracteres.');
   if (tipo === 'criar'){
     const { data, error } = await sb.auth.signUp({ email, password: senha, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (error) return erro('Não foi possível criar a conta: ' + error.message);
-    if (!data.session) return ok('Conta criada. Abra o e-mail que enviamos e confirme para poder entrar.');
+    if (error) return erro(erroLogin(error));
+    if (!data.session) return ok('Pronto. Se a conta ainda não existia, enviamos um e-mail para confirmar (veja também o spam): toque no link e depois em Entrar. Se você já tinha conta, é só tocar em Entrar.');
     return location.reload();
   }
   const { error } = await sb.auth.signInWithPassword({ email, password: senha });
-  if (error) return erro(error.message.includes('Invalid') ? 'E-mail ou senha incorretos.' : error.message.includes('confirm') ? 'Confirme o e-mail antes de entrar (veja a caixa de entrada).' : error.message);
+  if (error) return erro(erroLogin(error));
   location.reload();
 }
 
